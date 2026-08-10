@@ -1,178 +1,164 @@
-# సందేశిక · Sandeshika
+# Sandeshika · సందేశిక
 
-On-device SMS intelligence for India. Native Android, Compose M3, backed by
-[Medha](https://github.com/adabalap/medha) for inference over loopback.
+*sandeśikā* — "messenger". A private spending tracker built from the bank SMS
+already on your phone. Installable PWA, served by a small Flask app, powered by
+**Medha** running on-device.
 
-**Status: P0 scaffold.** Ingestion, sanitisation, template mining, encrypted
-storage and FTS. No AI yet — that is deliberate (see *Phases*).
-
----
-
-## What this is
-
-Not an SMS folder app. The thesis is that messages are telemetry about
-long-lived things — a bill, an order, an invite — and those things have
-*states*. "Bill due / paid / overdue" is one entity in three states, not three
-categories of message.
-
-```
-MESSAGE → EVENT → ENTITY → STATE → OBLIGATION → NARRATIVE
-```
+Nothing leaves the device. No cloud, no account. Works in airplane mode.
 
 ---
 
-## Setup
+## Run it
 
-### 1. Configure
+**Demo — no phone needed.** Generates a realistic 120-day Indian inbox and a
+mock model, so every screen is populated and the arithmetic is real:
 
 ```bash
-cp .env.example .env
-$EDITOR .env          # MEDHA_PORT must match the port shown in the Medha app
+./run.sh mock          # then open http://localhost:5000
 ```
 
-`.env` is gitignored. `.env.example` is the committed default of record.
-Precedence, highest first:
-
-1. **Runtime** — the Settings screen (DataStore)
-2. **Process env** — `SANDESHIKA_MEDHA_PORT=9000 ./gradlew assembleDebug`
-3. **`.env`**
-4. **`.env.example`**
-
-Anything a user might change *after* install (ports, retention, biometric) is
-also editable in-app. Build-time-only config would mean "recompile to change a
-port", which is not a real product.
-
-### 2. Pair with Medha
-
-In the Medha app, create a client:
-
-```
-id            sandeshika
-namespace     sms
-capabilities  generate, rag, store
-```
-
-Note it does **not** get `sms.read`. Sandeshika reads SMS itself, so a leaked
-Medha token cannot be used to read messages. Paste the token into `.env`
-(`MEDHA_TOKEN`) or leave it blank and let the app prompt — it is then stored in
-EncryptedSharedPreferences, not on disk in plaintext.
-
-Install the **`core`** Medha build. Sandeshika does not need Medha's SMS
-connector, and `core` installs without a Play Protect block.
-
-### 3. Build and install
+**Against your phone:**
 
 ```bash
-./gradlew :app:testDebugUnitTest     # golden corpus — run this first
-./gradlew :app:assembleDebug
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+export MEDHA_TOKEN=<token from Medha -> API clients -> add "sandeshika">
+./run.sh               # sets up adb forwarding, then serves on :5000
 ```
 
-**Use `adb install`, not the file manager.** Sandeshika declares `READ_SMS`, so
-Play Protect hard-blocks the sideload with an OK-only dialog. Installing through
-the shell never shows it, and nothing stays weakened.
-
-Then grant the runtime permission in-app and tap **Run backfill now**.
+Open **http://localhost:5000** and use the browser's *Install app* option.
 
 ---
 
-## Privacy posture
+## Why Flask, given the PWA has no backend
 
-- **No `INTERNET` permission.** At all. Loopback to Medha does not need one.
-  Verify it yourself in Settings → Apps → Sandeshika → Permissions. That is a
-  stronger claim than any privacy policy.
-- **Database is SQLCipher-encrypted**, with the passphrase generated on device
-  and held in the Android Keystore. It is never in the APK or in `.env`.
-- **Auth OTP bodies are purged** after `OTP_RETENTION_HOURS`. The row survives
-  so dedup stays correct; the body does not. Delivery OTPs are exempt — they
-  belong to an order and stay useful.
-- **Backup and device-transfer are excluded**, or a cloud backup would silently
-  undo all of the above.
-- `RECEIVE_SMS` is **not** declared. It is the permission Play Protect treats
-  most harshly, and a ContentObserver plus periodic sweep covers the same ground.
+The Flask server does exactly two things, and the second is not optional.
 
-Storing message bodies is a real trust cost, paid deliberately: FTS, re-parsing
-and audit are impossible without them. Medha, by contrast, never copies bodies —
-different job, different posture.
+**1. Serves the PWA** with the headers a browser requires before it will offer
+to install: a `manifest.webmanifest` with the right MIME type, and `sw.js`
+served from the **root** path — a service worker can only control pages at or
+below its own URL, so one served from `/static/sw.js` could never control `/`.
 
----
+**2. Reverse-proxies `/api/*` to Medha.** Without this the app cannot work at
+all:
 
-## Architecture notes worth knowing before you edit
+- **CORS.** Medha allows only its own loopback origins. A page served from
+  `:5000` is a different origin, so the browser would issue requests and then
+  refuse to let the page read any reply.
+- **The token.** Proxying keeps the credential in the server process. A direct
+  browser call would mean putting it in `localStorage`, where any script on the
+  page can read it. **The browser never sees the token.**
 
-**Paging is by timestamp, never offset.** A backfill over 40,000 messages takes
-many pages; one message arriving mid-scan shifts every offset, silently
-duplicating one message and skipping another.
+The proxy enforces an **endpoint allowlist**. An open proxy would let any script
+on the page drive the whole of Medha, including other clients' namespaces and
+the admin surface. `/api/v1/models`, `/api/admin/*` and anything else unlisted
+return `403`.
 
-**Amount parsing handles Indian lakh grouping.** `[\d,]+` reads
-`Rs.1,23,456.78` as `1.23` — no error, just a money app that is confidently
-wrong. See `SanitizerTest`.
+> Flask runs on your **laptop**, not as a second service on the phone. Medha is
+> the backend; this is a static host with one piece of necessary plumbing.
 
-**Mask order is load-bearing.** Amounts must be masked before generic digits,
-or `2,340` becomes three number tokens and one bank template fingerprints
-differently per amount.
+### Installability
 
-**The miner learns slots, it is not told them.** Bucket on sender + prefix,
-score by sequence similarity, merge by LCS alignment collapsing differing spans
-to `<VAR>`. A stoplist of "words that are really merchants" never stops needing
-curation and is wrong for every bank nobody has read yet. Two examples teach the
-slot, in any language.
-
-**Medha is a scarce resource, not a service.** One engine, one mutex. Its
-`InferenceScheduler` already does priority, thermal hysteresis, battery gating
-and a bounded queue. Do not reimplement any of it — send
-`X-Medha-Priority: batch` for backlog work and honour `429` as backpressure,
-never as an error.
-
-**Degraded mode is a feature.** With Medha offline, ingestion, search, the
-ledger and reminders all keep working. Only insights pause. The Money screen
-must never depend on Medha — it is pure SQL.
+Browsers only offer *Install app* on `localhost` or HTTPS. Over a LAN IP
+(`http://192.168.x.x:5000`) the app runs but **cannot be installed**. `run.sh`
+sets up `adb reverse` so the phone reaches it as `localhost` and installation
+works. `/config.json` reports `installable` so the UI can say so honestly.
 
 ---
 
-## Verifying the pattern logic without a device
+## Accuracy: the rule that makes this real
 
-`tools/` holds the Python harnesses used to validate the regexes and the miner
-against a real corpus before any Kotlin was written:
+**The model never parses and never does arithmetic.**
 
-```bash
-python3 tools/validate_patterns.py   # amount / account / OTP / DLT extraction
-python3 tools/validate_miner2.py     # template collapse, variable-length slots
-python3 tools/verify_lcs_port.py     # proves the Kotlin LCS port matches
-```
-
-The Kotlin equivalents live in `app/src/test/` and run in milliseconds. Add a
-case there before fixing anything in the template bank.
-
----
-
-## Phases
-
-| | Scope | Status |
+| Job | Done by | Why |
 |---|---|---|
-| **P0** | Ingest, SQLCipher, DLT normalisation, fingerprinting, template mining, FTS | **this scaffold** |
-| P1 | Seed regex for top 40 senders, events, postings, accounts, rollups | next |
-| P2 | Money screen | |
-| P3 | Balance assertions, reconciliation, recurring detection | |
-| P4 | Correlation keys, entities, BILL + ORDER state machines | |
-| P5 | Obligations, notification actions, Actions screen | |
-| P6 | Medha enrichment, template induction, review queue | |
-| P7 | Embeddings, hybrid search, memory cards | |
-| P8 | Insights, journal, forecast | |
-| P9 | Biometric, export, wipe, eval harness, release signing | |
+| Amount, date, merchant, reference | regex | deterministic, instant, testable |
+| Unknown merchant → category | model, cached forever | genuinely fuzzy, once per merchant |
+| Every figure on screen | JavaScript | a model that invents a plausible rupee number looks exactly like one that is right |
+| Phrasing an answer | model, given pre-computed figures | grounded, and the figures are shown |
 
-Medha does not enter until P6 — which is both the right risk order and the
-proof that degraded mode works, because you will have lived in it for weeks.
+### Indian-market traps, and how each is handled
+
+| Trap | Handling |
+|---|---|
+| **Credit-card bill paid from savings** | `kind: transfer`. The card purchases were already counted; booking the bill too double-counts the whole statement. |
+| **Refunds / reversals** | `kind: refund`, subtracted from spend, never counted as income. |
+| **Failed / declined** | Rejected. *"will be reversed"* is a promise, not money. |
+| **Pre-auth holds** (fuel, hotels) | Rejected — they settle later at a different amount. |
+| **Balance / credit-limit collision** | `"Spent Rs.500 … Avbl Credit Limit Rs.45,000"` takes 500. A pure limit advisory is rejected. |
+| **Multi-SMS double counting** | Reference number, plus a soft key of amount+direction in a 10-minute bucket that catches bank/UPI-app/merchant copies sharing no account tail. |
+| **TRAI DLT sender IDs** | Operator prefix stripped: `AX-HDFCBK` and `VM-HDFCBK` are one bank. |
+| **Unannounced template changes** | Messages from a registered bank sender that fail to parse surface as **template drift**, with a copy button. Visible, not silently dropped. |
+| **Cryptic VPAs** (`q398457239@ybl`) | Detected as opaque, sent to review. Never shown as a merchant, never sent to the model to be confidently mislabelled. |
+| **Aggregator prefixes** | `RAZORPAY*SOMESHOP` → `SOMESHOP`. |
+| **P2P vs P2M** | A phone-number VPA is genuinely ambiguous, so it is asked about rather than silently bucketed. |
+| **Foreign currency** | Captured with its currency, excluded from INR totals, flagged. No offline rate exists; a wrong conversion is worse than a known unknown. |
+| **Number anomalies** | `Rs 500/-`, `INR 100000`, `Rs. 1,00,000.00`, `Rs.500debited`. |
+
+Analytics sum by `kind` (`expense` / `income` / `refund` / `transfer`), **never
+by `direction`**. A credit-card bill is a debit but not expenditure; a refund is
+a credit but not income. Summing by direction is the easiest way to make every
+figure on the screen wrong.
+
+### DPDP Act
+
+Parsing happens entirely on-device and no SMS content is transmitted, which is
+what the Act's PII provisions point at. There is no server to breach.
+
+### Play Store
+
+`READ_SMS` is restricted — publishing would require being the default SMS
+handler or a personal-finance exemption with a privacy audit. This is built for
+sideloading, which is why Medha's `full` flavour exists and the `core` build
+stays clean of the permission.
 
 ---
 
-## Known gaps in this scaffold
+## Tests
 
-- **Never compiled.** Written without an Android SDK available; expect import
-  and API-surface fixes on first sync. The pure logic (Sanitizer, TemplateMiner)
-  is validated by the Python harnesses and the unit tests.
-- Launcher icon and Compose theme are placeholders.
-- `TemplateRow.senderNorm` is written as null by the worker; the miner keys
-  buckets by sender internally but does not yet surface it on the template.
-- No Room migration exists yet because there is only v1. The first schema bump
-  needs a hand-written migration and an instrumented test — destructive
-  migration is deliberately not configured.
+```bash
+node tests/parser.test.js        # 147 assertions — bank formats + every trap
+node tests/pipeline.test.js      #  36 assertions — mock Medha, full backfill
+PORT=5173 node tests/e2e_flask.js  # 21 assertions — real client, live Flask server
+```
+
+The e2e test drives the actual browser client against a running server:
+
+```
+inbox 295 SMS -> 179 transactions in 0.2s
+kinds: {"expense":171,"transfer":4,"income":4}
+duplicates 40 · rejected 76 · drift 0
+```
+
+## Bugs the tests caught
+
+Each produces a confident, plausible, wrong number — invisible in a demo.
+
+- **`Rs.5000` parsed as ₹500.** The alternation matched `\d{1,3}` and stopped,
+  truncating every un-grouped 4+ digit amount. Rent and salary off by 10×.
+- **`Rs.-500` parsed as +₹500.**
+- **A failed payment booked as spend.** The refund exemption was too broad, so
+  *"will be reversed due to insufficient balance"* slipped past the filter.
+- **Messages lost at tied timestamps.** The cursor advanced to exactly the
+  page minimum while the server filters `date < before`, so everything else at
+  that instant was skipped. Bank and UPI-app copies routinely share a
+  millisecond.
+- **A phone-number VPA became `"XX1234 to 9876543210"`** — the all-digits guard
+  discarded the correct handle, letting a worse pattern win.
+- **Balance alerts flooded the drift signal.** Moving direction detection ahead
+  of the reject pass made them exit as `no-direction`, so 30 routine SMS looked
+  like broken bank templates. Rejects now run in two passes.
+
+## Layout
+
+```
+app.py                    Flask: static host + allowlisted proxy + mock Medha
+static/index.html         PWA shell
+static/js/parser.js       deterministic SMS parser (no model)
+static/js/api.js          Medha client, resumable ingest
+static/js/app.js          analytics + UI (all arithmetic here)
+static/sw.js              offline shell; never caches /api
+tests/                    parser, pipeline, and live-server suites
+```
+
+Data lives in Medha's `/store` under this client's namespace, not IndexedDB —
+browser storage is evictable and Android will drop it. Message bodies are never
+copied; only parsed fields plus a short audit excerpt.
