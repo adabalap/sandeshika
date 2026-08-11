@@ -1,5 +1,5 @@
 /*
- * Lekha — UI and analytics.
+ * Sandeshika — UI and analytics.
  *
  * ACCURACY RULE, applied throughout: every number shown to the user is computed
  * in JavaScript from stored transactions. The language model is never asked to
@@ -241,7 +241,7 @@
     const all = summarise(txns, range('all'));
 
     const q = question.toLowerCase();
-    const catHit = LekhaParser.CATEGORIES.find((c) => q.includes(c));
+    const catHit = SandeshikaParser.CATEGORIES.find((c) => q.includes(c));
 
     const facts = {
       currency: 'INR',
@@ -306,11 +306,16 @@
 
     let total = 0;
     try {
+      // Three separate things must be true, and each has a different remedy.
+      // Reporting them apart is the difference between a two-minute fix and an
+      // afternoon.
       const st = await api('/connectors/sms/status');
       if (st.supported === false) throw new ApiError(
-        'This Medha build has no SMS connector. Install the "full" APK.', 0, 0);
+        'This Medha build has no SMS connector. Install the "full" APK — the "core" '
+        + 'build ships without SMS permissions so it installs cleanly.', 0, 0);
       if (!st.canRead) throw new ApiError(
-        'Medha does not have SMS permission yet. Grant it in the Medha app.', 0, 0);
+        'Medha does not have Android\'s SMS permission yet. '
+        + 'Medha → menu → SMS connector → Grant SMS permission.', 0, 0);
       total = st.totalMessages || 0;
     } catch (e) {
       banner(friendly(e), 'error');
@@ -374,7 +379,15 @@
   function friendly(e) {
     const m = String(e && e.message || e);
     if (e && e.status === 401) return 'Medha rejected the saved token — re-paste it in Setup.';
-    if (e && e.status === 403) return 'This client lacks the required capability in Medha.';
+    if (e && e.status === 403) {
+      // Medha names the missing capability; prefer its wording over a generic
+      // line, and say exactly where to fix it.
+      if (/capabilit/i.test(m)) {
+        return m + '  Fix: Medha → API clients → Edit permissions → tick "Read SMS".';
+      }
+      if (/sms/i.test(m)) return m;
+      return 'Medha refused that request: ' + m;
+    }
     if (e && e.status === 503) return 'Medha is running but no model is loaded.';
     if (e && e.status === 502) return m;
     if (/^HTTP \d+$/.test(m)) return `Medha returned ${m}. Check Setup.`;
@@ -401,33 +414,45 @@
         ? `${txns.length} transactions · all on this device`
         : 'Spending, bills and highlights from your messages';
     } catch (e) {
-      banner(e.message, 'error');
+      // Raw status codes are not an error message; friendly() names the fix.
+      banner(friendly(e), 'error');
     }
   }
 
   let cfg = {};
 
   function renderSettingsForm() {
+    const url = $('#medhaUrl'), tok = $('#tokenInput'), hint = $('#tokenHint');
+
     if (cfg.mock) {
-      $('#medhaUrl').value = 'mock';
-      $('#medhaUrl').disabled = true;
-      $('#tokenInput').disabled = true;
-      $('#btnSaveToken').disabled = true;
-      $('#tokenHint').textContent = 'Demo mode — no token needed.';
+      url.value = 'mock'; url.disabled = true;
+      tok.disabled = true; $('#btnSaveToken').disabled = true;
+      $('#btnClearSaved').hidden = true;
+      hint.textContent = 'Demo mode — no token needed.';
       return;
     }
-    $('#medhaUrl').value = cfg.medhaUrl || cfg.defaultMedhaUrl || 'http://127.0.0.1:8080';
-    if (cfg.envLocked) {
-      $('#tokenInput').disabled = true;
-      $('#btnSaveToken').disabled = true;
-      $('#tokenHint').textContent =
-        'Set by MEDHA_TOKEN in the environment. Restart the server without it to edit here.';
-    } else if (cfg.tokenConfigured) {
-      $('#tokenInput').placeholder = 'saved — leave blank to keep';
-      $('#tokenHint').textContent = `Saved token ${cfg.tokenPreview}. Type a new one to replace it.`;
+
+    // Never disabled. An earlier build locked this field whenever MEDHA_TOKEN
+    // was in the environment, which left anyone with a stale env token unable
+    // to fix it from the only screen that offers to.
+    url.disabled = false; tok.disabled = false; $('#btnSaveToken').disabled = false;
+    url.value = cfg.medhaUrl || cfg.defaultMedhaUrl || 'http://127.0.0.1:8080';
+
+    const parts = [];
+    if (cfg.tokenConfigured) {
+      tok.placeholder = 'saved — leave blank to keep';
+      parts.push(`Using token ${cfg.tokenPreview} (${
+        cfg.tokenSource === 'saved' ? 'saved here' : 'from the environment'}).`);
+      parts.push('Type a new one to replace it.');
     } else {
-      $('#tokenHint').textContent = 'No token saved yet.';
+      tok.placeholder = 'paste token';
+      parts.push('No token yet — paste one from Medha → API clients.');
     }
+    if (cfg.tokenSource === 'saved' && cfg.envTokenPresent) {
+      parts.push('This overrides MEDHA_TOKEN from the environment.');
+    }
+    hint.textContent = parts.join(' ');
+    $('#btnClearSaved').hidden = !(cfg.tokenSource === 'saved' || cfg.urlSource === 'saved');
   }
 
   async function saveSettings() {
@@ -436,19 +461,10 @@
     btn.disabled = true;
     el.innerHTML = '<span class="warn">Checking…</span>';
     try {
-      const r = await fetch('/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          medhaUrl: $('#medhaUrl').value.trim(),
-          token: $('#tokenInput').value.trim(),
-        }),
-      });
-      const j = await r.json();
-      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      await Transport.saveSettings($('#medhaUrl').value.trim(), $('#tokenInput').value.trim());
       $('#tokenInput').value = '';
       banner('Connected to Medha');
-      cfg = await fetch('/config.json').then((x) => x.json());
+      cfg = await Transport.config();
       renderSettingsForm();
       await checkConnection();
       await reload();
@@ -462,7 +478,7 @@
   async function checkConnection() {
     const el = $('#connState');
     try {
-      cfg = await fetch('/config.json').then((r) => r.json());
+      cfg = await Transport.config();
       renderSettingsForm();
       if (!cfg.mock && !cfg.tokenConfigured) {
         el.innerHTML = '<span class="warn">No token saved yet — paste one above.</span>';
@@ -479,7 +495,26 @@
         return false;
       }
       await api('/store?prefix=meta/&limit=1');   // proves the token is accepted
-      el.innerHTML = `<span class="ok">Connected to ${esc(cfg.medhaUrl)} · model loaded</span>`;
+
+      // Check SMS access now, while the user is on the screen that explains it.
+      let sms = '';
+      try {
+        const st = await api('/connectors/sms/status');
+        if (st.supported === false) {
+          sms = '<br><span class="err">No SMS connector in this Medha build — install the "full" APK.</span>';
+        } else if (!st.canRead) {
+          sms = '<br><span class="warn">Medha lacks Android\'s SMS permission. '
+              + 'Medha → menu → SMS connector → Grant.</span>';
+        } else {
+          sms = `<br><span class="ok">SMS access OK · ${st.totalMessages} messages visible</span>`;
+        }
+      } catch (e) {
+        sms = (e && e.status === 403)
+          ? '<br><span class="err">This client cannot read SMS. Medha → API clients → '
+            + 'Edit permissions → tick "Read SMS".</span>'
+          : `<br><span class="warn">${esc(friendly(e))}</span>`;
+      }
+      el.innerHTML = `<span class="ok">Connected to ${esc(cfg.medhaUrl)} · model loaded</span>${sms}`;
       if (!cfg.installable) {
         banner('Open via localhost or HTTPS to install as an app', 'info');
       }
@@ -517,6 +552,14 @@
   }));
 
   $('#btnSaveToken').addEventListener('click', saveSettings);
+  $('#btnClearSaved').addEventListener('click', async () => {
+    if (!confirm('Forget the saved token and address, and fall back to how the server was started?')) return;
+    try {
+      await Transport.clearSettings();
+      banner('Saved settings cleared');
+      await checkConnection();
+    } catch (e) { banner(friendly(e), 'error'); }
+  });
   $('#tokenInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') saveSettings(); });
   $('#medhaUrl').addEventListener('keydown', (e) => { if (e.key === 'Enter') saveSettings(); });
   $('#btnRecheck').addEventListener('click', async () => {
@@ -568,15 +611,15 @@
   });
 
   $('#btnReset').addEventListener('click', async () => {
-    if (!confirm('Delete every transaction and category Lekha has stored? Your SMS are untouched.')) return;
+    if (!confirm('Delete every transaction and category Sandeshika has stored? Your SMS are untouched.')) return;
     try {
       const rows = await SandeshikaApi.listPrefix('txn/', 100000);
       for (const r of rows) await api('/store/' + r.key, { method: 'DELETE' }).catch(() => {});
       Store.reset();
       txns = [];
       render();
-      banner('All Lekha data deleted');
-    } catch (e) { banner(e.message, 'error'); }
+      banner('All Sandeshika data deleted');
+    } catch (e) { banner(friendly(e), 'error'); }
   });
 
   (async () => {

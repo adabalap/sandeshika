@@ -1,5 +1,5 @@
 /*
- * Lekha — deterministic bank SMS parser.
+ * Sandeshika — deterministic bank SMS parser.
  *
  * DESIGN RULE: the LLM never parses. Bank SMS are templated, and a regex
  * extractor is instant, deterministic, reproducible and costs no battery. An
@@ -552,4 +552,4 @@ const API = {
 };
 
 if (typeof module !== 'undefined' && module.exports) module.exports = API;
-if (typeof window !== 'undefined') window.LekhaParser = API;
+if (typeof window !== 'undefined') window.SandeshikaParser = API;

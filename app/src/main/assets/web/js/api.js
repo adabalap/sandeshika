@@ -1,5 +1,5 @@
 /*
- * Lekha — Medha client and ingest pipeline.
+ * Sandeshika — Medha client and ingest pipeline.
  *
  * Correctness properties this file is responsible for:
  *
@@ -52,13 +52,14 @@ async function api(path, opts = {}) {
     'Content-Type': 'application/json',
     ...(opts.headers || {}),
   };
-  // No Authorization header: the server attaches it.
+  // No Authorization header here in either mode: the native bridge (APK) or
+  // the Flask proxy (browser) attaches it, so the token never enters JS.
 
   let r;
   try {
-    r = await fetch(MEDHA + path, { ...opts, headers });
+    r = await Transport.api(path, { ...opts, headers });
   } catch (e) {
-    throw new ApiError('Sandeshika server is not reachable.', 0, 0);
+    throw new ApiError(e.message || 'Cannot reach Medha.', 0, 0);
   }
   if (!r.ok) {
     let msg = 'HTTP ' + r.status;
@@ -154,14 +155,14 @@ async function primeCategoryCache() {
 const CATEGORY_PROMPT = (merchant) =>
   `Classify this Indian merchant into exactly one category.
 Merchant: "${merchant}"
-Categories: ${LekhaParser.CATEGORIES.join(', ')}
+Categories: ${SandeshikaParser.CATEGORIES.join(', ')}
 Answer with one word from the list and nothing else.`;
 
 async function resolveCategory(merchant, direction, onWait) {
-  const rule = LekhaParser.categorise(merchant, direction);
+  const rule = SandeshikaParser.categorise(merchant, direction);
   if (rule) return rule;
 
-  const mk = LekhaParser.merchantKey(merchant);
+  const mk = SandeshikaParser.merchantKey(merchant);
   if (!mk) return { category: 'other', source: 'rule' };
   if (catCache.has(mk)) return catCache.get(mk);
 
@@ -174,7 +175,7 @@ async function resolveCategory(merchant, direction, onWait) {
     const word = String(r.text || '').toLowerCase().replace(/[^a-z]/g, '');
     // Never trust the model's output shape. An unrecognised answer becomes
     // "other" rather than creating a phantom category in the totals.
-    category = LekhaParser.CATEGORIES.includes(word) ? word : 'other';
+    category = SandeshikaParser.CATEGORIES.includes(word) ? word : 'other';
   } catch (e) {
     if (e.status === 503 || e.status === 0) throw e; // service down: stop the run
     source = 'fallback';
@@ -200,14 +201,14 @@ async function ingestPage(messages, known, soft, onWait, drift) {
   let parsed = 0, rejected = 0, duplicates = 0;
 
   for (const m of messages) {
-    const r = LekhaParser.parse(m);
+    const r = SandeshikaParser.parse(m);
     if (!r.ok) {
       rejected++;
       // TEMPLATE DRIFT SIGNAL: a message from a registered bank sender that we
       // could not parse probably means the bank changed its format. Ordinary
       // noise (OTPs, promos) is expected and not counted here.
-      if (drift && LekhaParser.isFinancialSender(m.address) &&
-          !LekhaParser.EXPECTED_NOISE.includes(r.reason)) {
+      if (drift && SandeshikaParser.isFinancialSender(m.address) &&
+          !SandeshikaParser.EXPECTED_NOISE.includes(r.reason)) {
         drift.push({ sender: m.address, reason: r.reason, body: String(m.body).slice(0, 160) });
       }
       continue;

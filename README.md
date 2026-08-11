@@ -1,179 +1,105 @@
-# Sandeshika · సందేశిక
+# Sandeshika · సందేశిక — Android app
 
-*sandeśikā* — "messenger". Private insights from the SMS already on your phone:
-spending, bills and highlights. Installable PWA, served by a small Flask app,
-powered by **Medha** running on-device.
+*sandeśikā*, "messenger". Private insights from the SMS already on your phone —
+spending, bills, highlights. A single APK. **No Flask, no Termux, no adb, no
+port forwarding.**
 
-Nothing leaves the device. No cloud, no account. Works in airplane mode.
-
----
-
-## Run it
-
-**Demo — no phone needed.** Generates a realistic 120-day Indian inbox and a
-mock model, so every screen is populated and the arithmetic is real:
+## Install
 
 ```bash
-./run.sh mock          # then open http://localhost:5000
+adb install -r sandeshika-1.0.0-debug-<sha>.apk
 ```
 
-**Against your phone:**
+Open it, go to **Setup**, paste your Medha token, set the address to match
+Medha's port. Done.
 
-```bash
-./run.sh               # sets up adb forwarding, then serves on :5000
-```
+No SMS permission is requested — see below.
 
-Open **http://localhost:5000**, go to **Setup**, and paste your Medha token.
-Set the **Medha address** to match the port shown in the Medha app — the
-default is `8080`, but if you changed it to `8001` put
-`http://127.0.0.1:8001` here.
+## Why this replaces the Flask build
 
-The token is validated before it is saved: a wrong port, an unreachable Medha
-and a rejected token each produce a specific message rather than `HTTP 401`.
-It is then stored **server-side** in `settings.json` (mode `0600`) and attached
-to outgoing requests. The browser never receives it — only a masked preview
-like `realto…cdef`.
-
-`MEDHA_TOKEN` / `MEDHA_URL` in the environment still work and take precedence;
-the Setup screen says so and disables the field rather than silently ignoring
-what you type.
-
-Then use the browser's *Install app* option to add it to your home screen.
-
----
-
-## Why Flask, given the PWA has no backend
-
-The Flask server does exactly two things, and the second is not optional.
-
-**1. Serves the PWA** with the headers a browser requires before it will offer
-to install: a `manifest.webmanifest` with the right MIME type, and `sw.js`
-served from the **root** path — a service worker can only control pages at or
-below its own URL, so one served from `/static/sw.js` could never control `/`.
-
-**2. Reverse-proxies `/api/*` to Medha.** Without this the app cannot work at
-all:
-
-- **CORS.** Medha allows only its own loopback origins. A page served from
-  `:5000` is a different origin, so the browser would issue requests and then
-  refuse to let the page read any reply.
-- **The token.** Proxying keeps the credential in the server process. A direct
-  browser call would mean putting it in `localStorage`, where any script on the
-  page can read it. **The browser never sees the token.**
-
-The proxy enforces an **endpoint allowlist**. An open proxy would let any script
-on the page drive the whole of Medha, including other clients' namespaces and
-the admin surface. `/api/v1/models`, `/api/admin/*` and anything else unlisted
-return `403`.
-
-> Flask runs on your **laptop**, not as a second service on the phone. Medha is
-> the backend; this is a static host with one piece of necessary plumbing.
-
-### Installability
-
-Browsers only offer *Install app* on `localhost` or HTTPS. Over a LAN IP
-(`http://192.168.x.x:5000`) the app runs but **cannot be installed**. `run.sh`
-sets up `adb reverse` so the phone reaches it as `localhost` and installation
-works. `/config.json` reports `installable` so the UI can say so honestly.
-
----
-
-## Accuracy: the rule that makes this real
-
-**The model never parses and never does arithmetic.**
-
-| Job | Done by | Why |
+| | Flask + browser | This APK |
 |---|---|---|
-| Amount, date, merchant, reference | regex | deterministic, instant, testable |
-| Unknown merchant → category | model, cached forever | genuinely fuzzy, once per merchant |
-| Every figure on screen | JavaScript | a model that invents a plausible rupee number looks exactly like one that is right |
-| Phrasing an answer | model, given pre-computed figures | grounded, and the figures are shown |
+| Extra runtime | Python, on a laptop or Termux | none |
+| Reaching Medha | `adb forward`, reverse proxy | direct, on-device |
+| CORS | proxy required to avoid it | not applicable |
+| Token location | server process | Android Keystore |
+| Install | PWA, only on localhost/HTTPS | normal APK |
+| Offline | service worker | assets are local |
 
-### Indian-market traps, and how each is handled
+The UI is the same code. `js/bridge.js` picks a transport at load time, so
+`app.js` and `api.js` never branch on which host they are running under.
 
-| Trap | Handling |
-|---|---|
-| **Credit-card bill paid from savings** | `kind: transfer`. The card purchases were already counted; booking the bill too double-counts the whole statement. |
-| **Refunds / reversals** | `kind: refund`, subtracted from spend, never counted as income. |
-| **Failed / declined** | Rejected. *"will be reversed"* is a promise, not money. |
-| **Pre-auth holds** (fuel, hotels) | Rejected — they settle later at a different amount. |
-| **Balance / credit-limit collision** | `"Spent Rs.500 … Avbl Credit Limit Rs.45,000"` takes 500. A pure limit advisory is rejected. |
-| **Multi-SMS double counting** | Reference number, plus a soft key of amount+direction in a 10-minute bucket that catches bank/UPI-app/merchant copies sharing no account tail. |
-| **TRAI DLT sender IDs** | Operator prefix stripped: `AX-HDFCBK` and `VM-HDFCBK` are one bank. |
-| **Unannounced template changes** | Messages from a registered bank sender that fail to parse surface as **template drift**, with a copy button. Visible, not silently dropped. |
-| **Cryptic VPAs** (`q398457239@ybl`) | Detected as opaque, sent to review. Never shown as a merchant, never sent to the model to be confidently mislabelled. |
-| **Aggregator prefixes** | `RAZORPAY*SOMESHOP` → `SOMESHOP`. |
-| **P2P vs P2M** | A phone-number VPA is genuinely ambiguous, so it is asked about rather than silently bucketed. |
-| **Foreign currency** | Captured with its currency, excluded from INR totals, flagged. No offline rate exists; a wrong conversion is worse than a known unknown. |
-| **Number anomalies** | `Rs 500/-`, `INR 100000`, `Rs. 1,00,000.00`, `Rs.500debited`. |
+## Architecture
 
-Analytics sum by `kind` (`expense` / `income` / `refund` / `transfer`), **never
-by `direction`**. A credit-card bill is a debit but not expenditure; a refund is
-a credit but not income. Summing by direction is the easiest way to make every
-figure on the screen wrong.
+```
+WebView  ──loads──▶  https://appassets.androidplatform.net/assets/web/
+   │                 (WebViewAssetLoader — a real secure origin, no server)
+   │
+   └──JS bridge──▶  MedhaBridge.kt  ──HTTP──▶  Medha @ 127.0.0.1:8080
+                    (holds the token)
+```
 
-### DPDP Act
+**Why a native bridge rather than `fetch()` straight to Medha.** The WebView's
+origin is `https://appassets.androidplatform.net`; Medha is
+`http://127.0.0.1:8080`. That is cross-origin *and* mixed content, so the
+request would be blocked twice over. Going through native sidesteps both and
+keeps the token out of JavaScript — the same property the Flask proxy existed
+to preserve.
 
-Parsing happens entirely on-device and no SMS content is transmitted, which is
-what the Act's PII provisions point at. There is no server to breach.
+**Threading.** `@JavascriptInterface` methods run on a WebView worker thread,
+where anything slow stalls JS. Calls are therefore fire-and-forget: JS passes a
+request id, native works on a coroutine, and the result arrives via
+`window.__medhaResolve`. `bridge.js` wraps that back into a Promise, so callers
+just `await`.
 
-### Play Store
+**The same allowlist** the Flask proxy enforced is enforced in
+`MedhaBridge.request()`. Anything outside it returns 403 without a network call.
 
-`READ_SMS` is restricted — publishing would require being the default SMS
-handler or a personal-finance exemption with a privacy audit. This is built for
-sideloading, which is why Medha's `full` flavour exists and the `core` build
-stays clean of the permission.
+## Permissions
 
----
+Only `INTERNET`, which Android requires even for `127.0.0.1`.
+
+**`READ_SMS` is deliberately absent.** Sandeshika never touches the SMS provider
+— it asks Medha, which holds that permission. So this APK does not trigger the
+Play Protect block that SMS permissions cause; only Medha's `full` flavour does.
+
+The token is stored in `EncryptedSharedPreferences` (Android Keystore), excluded
+from cloud backup and device transfer. If the Keystore is unavailable — it
+fails on a few OEM builds — it degrades to plain prefs inside the app sandbox
+rather than becoming unusable.
+
+## Medha setup
+
+The `sandeshika` client needs **`store`** and **`sms.read`**. Add it in Medha →
+**API clients**, tick **Read SMS** (off by default), and grant Medha itself the
+Android SMS permission via **menu → SMS connector**. Sandeshika's Setup screen
+checks all three and names whichever is missing.
+
+## Build
+
+Push to GitHub; the workflow produces `sandeshika-<version>-<type>-<sha>.apk`.
+Set `SANDESHIKA_KEYSTORE_BASE64` and friends for a signed release build.
+
+CI verifies the **bridge contract** before compiling: the JS calls
+`AndroidMedha` methods by name, so a renamed `@JavascriptInterface` method would
+fail only at runtime. R8 is off in release for the same reason.
 
 ## Tests
 
 ```bash
-node tests/parser.test.js        # 147 assertions — bank formats + every trap
-node tests/pipeline.test.js      #  36 assertions — mock Medha, full backfill
-PORT=5173 node tests/e2e_flask.js  # 21 assertions — real client, live Flask server
+node tests/bridge.test.js     # 15 assertions
+python3 tools/check_overrides.py app/src
 ```
 
-The e2e test drives the actual browser client against a running server:
+`bridge.test.js` stands in for `MedhaBridge.kt` with a JS implementation of the
+same contract and drives the **real** client through it — auth failures,
+allowlist, a full 30-message import, exact rupee totals, idempotent re-run, and
+that the token never becomes visible to the page.
 
-```
-inbox 295 SMS -> 179 transactions in 0.2s
-kinds: {"expense":171,"transfer":4,"income":4}
-duplicates 40 · rejected 76 · drift 0
-```
+## What is not verified
 
-## Bugs the tests caught
-
-Each produces a confident, plausible, wrong number — invisible in a demo.
-
-- **`Rs.5000` parsed as ₹500.** The alternation matched `\d{1,3}` and stopped,
-  truncating every un-grouped 4+ digit amount. Rent and salary off by 10×.
-- **`Rs.-500` parsed as +₹500.**
-- **A failed payment booked as spend.** The refund exemption was too broad, so
-  *"will be reversed due to insufficient balance"* slipped past the filter.
-- **Messages lost at tied timestamps.** The cursor advanced to exactly the
-  page minimum while the server filters `date < before`, so everything else at
-  that instant was skipped. Bank and UPI-app copies routinely share a
-  millisecond.
-- **A phone-number VPA became `"XX1234 to 9876543210"`** — the all-digits guard
-  discarded the correct handle, letting a worse pattern win.
-- **Balance alerts flooded the drift signal.** Moving direction detection ahead
-  of the reject pass made them exit as `no-direction`, so 30 routine SMS looked
-  like broken bank templates. Rejects now run in two passes.
-
-## Layout
-
-```
-app.py                    Flask: static host + allowlisted proxy + settings + mock Medha
-settings.json             saved token and Medha URL, mode 0600, gitignored
-static/index.html         PWA shell
-static/js/parser.js       deterministic SMS parser (no model)
-static/js/api.js          Medha client, resumable ingest
-static/js/app.js          analytics + UI (all arithmetic here)
-static/sw.js              offline shell; never caches /api
-tests/                    parser, pipeline, and live-server suites
-```
-
-Data lives in Medha's `/store` under this client's namespace, not IndexedDB —
-browser storage is evictable and Android will drop it. Message bodies are never
-copied; only parsed fields plus a short audit excerpt.
+No Android SDK was available when this was written, so the APK has never been
+compiled or run. Kotlin parses cleanly and every resource and asset reference
+resolves, but `MedhaBridge` ↔ WebView has only been exercised through the JS
+simulation. The first real run is where to look for surprises — most likely in
+`WebViewAssetLoader` paths or `EncryptedSharedPreferences` on your device.

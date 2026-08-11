@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Message bubble with a rupee. Content sits inside the 66dp adaptive keyline. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:pathData="M31,28 h46 a10,10 0 0 1 10,10 v28 a10,10 0 0 1 -10,10 h-27 l-16,13 v-13 h-3 a10,10 0 0 1 -10,-10 v-28 a10,10 0 0 1 10,-10 z"
+        android:fillColor="#F5FFFFFF" />
+    <group>
+        <path android:pathData="M40,39 h19" android:strokeColor="#FF0B3D6B" android:strokeWidth="3.7" android:strokeLineCap="round" />
+        <path android:pathData="M40,45.5 h19" android:strokeColor="#FF0B3D6B" android:strokeWidth="3.7" android:strokeLineCap="round" />
+        <path android:pathData="M40,52 h9.6 c6.3,0 9.6,-3.4 9.6,-6.5" android:strokeColor="#FF0B3D6B" android:strokeWidth="3.7" android:strokeLineCap="round" />
+        <path android:pathData="M40,52 L58,66.5" android:strokeColor="#FF0B3D6B" android:strokeWidth="3.7" android:strokeLineCap="round" />
+    </group>
+    <path android:pathData="M64.5,57 h5.5 v9 h-5.5 z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:startX="0" android:startY="57" android:endX="0" android:endY="66" android:type="linear">
+                <item android:offset="0.0" android:color="#FFFFE29A" />
+                <item android:offset="1.0" android:color="#FFF4A62E" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:pathData="M72.5,50.5 h5.5 v15.5 h-5.5 z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:startX="0" android:startY="50" android:endX="0" android:endY="66" android:type="linear">
+                <item android:offset="0.0" android:color="#FFFFE29A" />
+                <item android:offset="1.0" android:color="#FFF4A62E" />
+            </gradient>
+        </aapt:attr>
+    </path>
+</vector>
