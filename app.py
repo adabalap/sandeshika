@@ -37,9 +37,54 @@ APP_NAME = "Sandeshika"
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATIC = os.path.join(HERE, "static")
 
-MEDHA_URL = os.environ.get("MEDHA_URL", "http://127.0.0.1:8080").rstrip("/")
+SETTINGS_FILE = os.path.join(HERE, "settings.json")
+
+DEFAULT_MEDHA_URL = "http://127.0.0.1:8080"
+MEDHA_URL = os.environ.get("MEDHA_URL", DEFAULT_MEDHA_URL).rstrip("/")
 MEDHA_TOKEN = os.environ.get("MEDHA_TOKEN", "")
 MOCK = os.environ.get("SANDESHIKA_MOCK", "") == "1"
+
+
+def load_settings():
+    """
+    Settings saved from the UI, layered under the environment.
+
+    Precedence: env/CLI wins, because an explicitly launched server should not
+    be silently overridden by something a browser wrote earlier.
+    """
+    global MEDHA_URL, MEDHA_TOKEN
+    if not os.path.exists(SETTINGS_FILE):
+        return
+    try:
+        with open(SETTINGS_FILE) as f:
+            saved = json.load(f)
+    except (OSError, ValueError):
+        return
+    if not os.environ.get("MEDHA_URL") and saved.get("medhaUrl"):
+        MEDHA_URL = str(saved["medhaUrl"]).rstrip("/")
+    if not os.environ.get("MEDHA_TOKEN") and saved.get("token"):
+        MEDHA_TOKEN = saved["token"]
+
+
+def save_settings(url: str, token: str):
+    """
+    Persisted server-side so the browser never holds the credential.
+
+    Mode 0600: the token grants access to everything that client can reach in
+    Medha, so it should not be world-readable on a shared machine.
+    """
+    data = {"medhaUrl": url, "token": token}
+    tmp = SETTINGS_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f, indent=2)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, SETTINGS_FILE)
+
+
+def mask(token: str) -> str:
+    if not token:
+        return ""
+    return token[:6] + "…" + token[-4:] if len(token) > 12 else "set"
 
 app = Flask(__name__, static_folder=None)
 
@@ -101,11 +146,88 @@ def config():
     return jsonify({
         "app": APP_NAME,
         "mock": MOCK,
-        "medhaUrl": MEDHA_URL if not MOCK else "mock",
+        "medhaUrl": "mock" if MOCK else MEDHA_URL,
+        "defaultMedhaUrl": DEFAULT_MEDHA_URL,
         "tokenConfigured": bool(MEDHA_TOKEN) or MOCK,
+        "tokenPreview": mask(MEDHA_TOKEN),
+        "envLocked": bool(os.environ.get("MEDHA_TOKEN")),
         "installable": request.host.split(":")[0] in ("localhost", "127.0.0.1")
                        or request.scheme == "https",
     })
+
+
+@app.route("/settings", methods=["POST"])
+def settings():
+    """
+    Accepts a token and Medha URL from the Setup screen and stores them on the
+    SERVER. The value is written to disk and attached to outgoing requests; it
+    is never sent back to the browser, and the response only ever contains a
+    masked preview.
+    """
+    global MEDHA_URL, MEDHA_TOKEN
+
+    if os.environ.get("MEDHA_TOKEN"):
+        return jsonify({
+            "error": "This server was started with MEDHA_TOKEN in the environment, "
+                     "which takes precedence. Restart without it to set the token here.",
+            "code": "env_locked",
+        }), 409
+
+    body = request.get_json(silent=True) or {}
+    url = str(body.get("medhaUrl") or MEDHA_URL).strip().rstrip("/")
+    token = str(body.get("token") or "").strip()
+
+    if not re.match(r"^https?://[\w.\-]+(:\d{1,5})?$", url):
+        return jsonify({"error": f"'{url}' is not a valid base URL, e.g. http://127.0.0.1:8001",
+                        "code": "bad_url"}), 400
+
+    # An empty token means "keep the current one" so the user can change only
+    # the port without re-pasting a credential they cannot read back.
+    if not token:
+        token = MEDHA_TOKEN
+    if not token:
+        return jsonify({"error": "A Medha API token is required", "code": "no_token"}), 400
+
+    # Verify before persisting: saving a token that does not work just moves the
+    # failure somewhere less obvious.
+    try:
+        probe = requests.get(f"{url}/health", timeout=6)
+        if probe.status_code != 200:
+            return jsonify({"error": f"Medha at {url} returned HTTP {probe.status_code} on /health",
+                            "code": "medha_error"}), 502
+        auth = requests.get(f"{url}/store", params={"prefix": "meta/", "limit": 1},
+                            headers={"Authorization": f"Bearer {token}"}, timeout=10)
+        if auth.status_code in (401, 403):
+            return jsonify({"error": "Medha rejected that token. Check it was copied in full, "
+                                     "and that the client has the store capability.",
+                            "code": "bad_token"}), 401
+    except requests.exceptions.ConnectionError:
+        return jsonify({"error": f"Nothing is listening at {url}. Check Medha's port, and that "
+                                 f"the phone is forwarded (adb forward tcp:8001 tcp:8001).",
+                        "code": "medha_unreachable"}), 502
+    except requests.exceptions.Timeout:
+        return jsonify({"error": f"{url} did not respond in time", "code": "timeout"}), 504
+
+    MEDHA_URL, MEDHA_TOKEN = url, token
+    save_settings(url, token)
+    health = probe.json() if probe.headers.get("Content-Type", "").startswith("application/json") else {}
+    return jsonify({
+        "ok": True,
+        "medhaUrl": MEDHA_URL,
+        "tokenPreview": mask(MEDHA_TOKEN),
+        "modelLoaded": bool(health.get("modelLoaded")),
+    })
+
+
+@app.route("/settings", methods=["DELETE"])
+def clear_settings():
+    global MEDHA_TOKEN
+    MEDHA_TOKEN = "" if not os.environ.get("MEDHA_TOKEN") else MEDHA_TOKEN
+    try:
+        os.remove(SETTINGS_FILE)
+    except OSError:
+        pass
+    return jsonify({"cleared": True})
 
 
 # ---------------------------------------------------------------------------
@@ -325,11 +447,14 @@ def main():
     MEDHA_URL = args.medha.rstrip("/")
     MEDHA_TOKEN = args.token
     MOCK = args.mock or MOCK
+    # Anything saved from the Setup screen fills the gaps left by env/CLI.
+    if not MOCK:
+        load_settings()
 
     print(f"\n  {APP_NAME} · సందేశిక")
     print(f"  http://{args.host}:{args.port}")
     print(f"  Medha    : {'MOCK (synthetic inbox)' if MOCK else MEDHA_URL}")
-    print(f"  Token    : {'set' if MEDHA_TOKEN else ('not needed in mock' if MOCK else 'MISSING — set MEDHA_TOKEN')}")
+    print(f"  Token    : {mask(MEDHA_TOKEN) if MEDHA_TOKEN else ('not needed in mock' if MOCK else 'not set — paste it in Setup')}")
     if args.host not in ("127.0.0.1", "localhost"):
         print("\n  ! Browsers only offer 'Install app' on localhost or HTTPS.")
         print("    On a LAN IP the app still runs but cannot be installed.")

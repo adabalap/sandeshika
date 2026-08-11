@@ -1,7 +1,7 @@
 {
   "name": "Sandeshika — spending from your messages",
   "short_name": "Sandeshika",
-  "description": "Private, on-device spending tracker built from your bank SMS. No cloud, no account.",
+  "description": "Private, on-device insights from your SMS — spending, bills and highlights. No cloud, no account.",
   "lang": "en-IN",
   "start_url": "/",
   "scope": "/",

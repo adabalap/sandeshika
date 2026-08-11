@@ -3,6 +3,8 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+export MEDHA_TOKEN=970fedf6bfb5e105b9cb65f5f7a6c0ace02dcae4
+
 [ -d .venv ] || python3 -m venv .venv
 source .venv/bin/activate
 pip install -q -r requirements.txt
@@ -24,7 +26,7 @@ if [ -z "${MEDHA_TOKEN:-}" ]; then
 fi
 
 echo "Forwarding the phone's Medha to this machine..."
-adb forward tcp:8080 tcp:8080 || echo "  (adb not available - set MEDHA_URL manually)"
+adb forward tcp:8001 tcp:8001 || echo "  (adb not available - set MEDHA_URL manually)"
 echo "Making this server reachable from the phone as localhost..."
 adb reverse "tcp:$PORT" "tcp:$PORT" || true
 

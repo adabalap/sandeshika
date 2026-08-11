@@ -24,9 +24,16 @@ body{
 .app-bar h1{margin:0;font-size:17px;line-height:1.25}
 .app-bar p{margin:1px 0 0;font-size:11px;opacity:.85}
 .icon-btn{
-  background:rgba(255,255,255,.18); border:0; color:#fff; width:36px; height:36px;
-  border-radius:50%; font-size:19px; cursor:pointer;
+  background:rgba(255,255,255,.18); border:0; color:#fff; width:38px; height:38px;
+  border-radius:50%; cursor:pointer; flex:0 0 auto;
+  /* flex centring rather than line-height: the old text glyph sat off-centre
+     because its font metrics differ per device. */
+  display:inline-flex; align-items:center; justify-content:center; padding:0;
 }
+.icon-btn:active{background:rgba(255,255,255,.32)}
+.icon-btn svg{display:block}
+.icon-btn.spin svg{animation:spin .9s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
 
 /* tabs */
 .tabs{display:flex;background:var(--green-2);position:sticky;top:0;z-index:9}
@@ -154,3 +161,9 @@ code{background:var(--bg);padding:1px 5px;border-radius:4px;font-size:12px}
   .drift{background:#241E10;border-color:#4A3D1C}
   .drift strong{color:#E8C877}
 }
+
+/* setup form */
+.fld{display:block;margin-top:12px}
+.fld span{display:block;font-size:11px;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--muted);margin-bottom:5px}
+.hint.tight{margin:6px 0 0;font-size:11px}

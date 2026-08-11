@@ -313,7 +313,7 @@
         'Medha does not have SMS permission yet. Grant it in the Medha app.', 0, 0);
       total = st.totalMessages || 0;
     } catch (e) {
-      banner(e.message, 'error');
+      banner(friendly(e), 'error');
       $('#btnImport').disabled = false;
       $('#btnStop').classList.add('hidden');
       return;
@@ -335,7 +335,7 @@
       renderDrift(res.drift);
       await reload();
     } catch (e) {
-      banner('Import stopped: ' + e.message, 'error');
+      banner('Import stopped: ' + friendly(e), 'error');
     } finally {
       $('#btnImport').disabled = false;
       $('#btnStop').classList.add('hidden');
@@ -367,6 +367,20 @@
     <div class="stat"><span>${t.duplicates}</span>duplicates skipped</div>
     <div class="stat"><span>${t.rejected}</span>non-transactions</div>`;
 
+  /**
+   * Raw status codes are not an error message. "HTTP 401" tells the user
+   * nothing they can act on; naming the cause and the fix does.
+   */
+  function friendly(e) {
+    const m = String(e && e.message || e);
+    if (e && e.status === 401) return 'Medha rejected the saved token — re-paste it in Setup.';
+    if (e && e.status === 403) return 'This client lacks the required capability in Medha.';
+    if (e && e.status === 503) return 'Medha is running but no model is loaded.';
+    if (e && e.status === 502) return m;
+    if (/^HTTP \d+$/.test(m)) return `Medha returned ${m}. Check Setup.`;
+    return m;
+  }
+
   function banner(msg, kind = 'info') {
     const b = $('#banner');
     $('#bannerText').textContent = msg;
@@ -385,26 +399,80 @@
       render();
       $('#subtitle').textContent = txns.length
         ? `${txns.length} transactions · all on this device`
-        : 'Import your SMS to begin';
+        : 'Spending, bills and highlights from your messages';
     } catch (e) {
       banner(e.message, 'error');
+    }
+  }
+
+  let cfg = {};
+
+  function renderSettingsForm() {
+    if (cfg.mock) {
+      $('#medhaUrl').value = 'mock';
+      $('#medhaUrl').disabled = true;
+      $('#tokenInput').disabled = true;
+      $('#btnSaveToken').disabled = true;
+      $('#tokenHint').textContent = 'Demo mode — no token needed.';
+      return;
+    }
+    $('#medhaUrl').value = cfg.medhaUrl || cfg.defaultMedhaUrl || 'http://127.0.0.1:8080';
+    if (cfg.envLocked) {
+      $('#tokenInput').disabled = true;
+      $('#btnSaveToken').disabled = true;
+      $('#tokenHint').textContent =
+        'Set by MEDHA_TOKEN in the environment. Restart the server without it to edit here.';
+    } else if (cfg.tokenConfigured) {
+      $('#tokenInput').placeholder = 'saved — leave blank to keep';
+      $('#tokenHint').textContent = `Saved token ${cfg.tokenPreview}. Type a new one to replace it.`;
+    } else {
+      $('#tokenHint').textContent = 'No token saved yet.';
+    }
+  }
+
+  async function saveSettings() {
+    const el = $('#connState');
+    const btn = $('#btnSaveToken');
+    btn.disabled = true;
+    el.innerHTML = '<span class="warn">Checking…</span>';
+    try {
+      const r = await fetch('/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          medhaUrl: $('#medhaUrl').value.trim(),
+          token: $('#tokenInput').value.trim(),
+        }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      $('#tokenInput').value = '';
+      banner('Connected to Medha');
+      cfg = await fetch('/config.json').then((x) => x.json());
+      renderSettingsForm();
+      await checkConnection();
+      await reload();
+    } catch (e) {
+      el.innerHTML = `<span class="err">${esc(e.message)}</span>`;
+    } finally {
+      btn.disabled = false;
     }
   }
 
   async function checkConnection() {
     const el = $('#connState');
     try {
-      const cfg = await fetch('/config.json').then((r) => r.json());
+      cfg = await fetch('/config.json').then((r) => r.json());
+      renderSettingsForm();
+      if (!cfg.mock && !cfg.tokenConfigured) {
+        el.innerHTML = '<span class="warn">No token saved yet — paste one above.</span>';
+        return false;
+      }
       const h = await api('/health');
       if (cfg.mock) {
         el.innerHTML = '<span class="warn">Demo mode — synthetic inbox, mock model. '
           + 'Figures are computed for real from generated messages.</span>';
         return true;
-      }
-      if (!cfg.tokenConfigured) {
-        el.innerHTML = '<span class="err">Server has no MEDHA_TOKEN set. '
-          + 'Restart it with --token &lt;token&gt;.</span>';
-        return false;
       }
       if (!h.modelLoaded) {
         el.innerHTML = '<span class="warn">Medha is reachable but no model is loaded.</span>';
@@ -417,7 +485,7 @@
       }
       return true;
     } catch (e) {
-      el.innerHTML = `<span class="err">${esc(e.message)}</span>`;
+      el.innerHTML = `<span class="err">${esc(friendly(e))}</span>`;
       return false;
     }
   }
@@ -448,6 +516,9 @@
     ask();
   }));
 
+  $('#btnSaveToken').addEventListener('click', saveSettings);
+  $('#tokenInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') saveSettings(); });
+  $('#medhaUrl').addEventListener('keydown', (e) => { if (e.key === 'Enter') saveSettings(); });
   $('#btnRecheck').addEventListener('click', async () => {
     if (await checkConnection()) { banner('Connected'); reload(); }
   });
@@ -463,11 +534,17 @@
   $('#btnStop').addEventListener('click', () => { stopRequested = true; });
 
   $('#btnRefresh').addEventListener('click', async () => {
+    const btn = $('#btnRefresh');
+    btn.classList.add('spin');
     try {
       const r = await catchUp();
       banner(r.written ? `${r.written} new transactions` : 'Up to date');
       if (r.written) reload();
-    } catch (e) { banner(e.message, 'error'); }
+    } catch (e) {
+      banner(friendly(e), 'error');
+    } finally {
+      btn.classList.remove('spin');
+    }
   });
 
   // Review queue: accepting counts a transaction, rejecting removes it.

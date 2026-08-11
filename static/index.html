@@ -15,9 +15,15 @@
   <img src="/static/icons/icon.svg" alt="" class="mark" />
   <div class="titles">
     <h1>Sandeshika · సందేశిక</h1>
-    <p id="subtitle">Your spending, from your own SMS</p>
+    <p id="subtitle">Spending, bills and highlights from your messages</p>
   </div>
-  <button id="btnRefresh" class="icon-btn" title="Check for new messages" aria-label="Refresh">&#8635;</button>
+  <button id="btnRefresh" class="icon-btn" title="Check for new messages" aria-label="Check for new messages">
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+         stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1" />
+      <polyline points="20.5 4 20.5 9.2 15.3 9.2" />
+    </svg>
+  </button>
 </header>
 
 <nav class="tabs" role="tablist">
@@ -116,13 +122,34 @@
   <!-- ============================= SETUP ============================= -->
   <section id="view-setup" class="view hidden">
     <div class="card">
-      <h2>1. Connection</h2>
+      <h2>1. Connect to Medha</h2>
       <p class="hint">
-        The token lives on the server, not in this browser. Start Sandeshika with
-        <code>--token &lt;your Medha token&gt;</code>, or run <code>--mock</code>
-        to explore with a synthetic inbox and no phone.
+        In Medha: menu → <strong>API clients</strong> → Add client (id
+        <code>sandeshika</code>), grant it <code>sms.read</code>, then paste the
+        token here. It is stored on this server, never in the browser.
       </p>
-      <button id="btnRecheck">Check connection</button>
+
+      <label class="fld">
+        <span>Medha address</span>
+        <input id="medhaUrl" type="url" inputmode="url" spellcheck="false"
+               placeholder="http://127.0.0.1:8080" autocomplete="off" />
+      </label>
+      <p class="hint tight">
+        Match the port shown in the Medha app. Default is 8080; change it here if
+        you set something else.
+      </p>
+
+      <label class="fld">
+        <span>API token</span>
+        <input id="tokenInput" type="password" placeholder="paste token"
+               autocomplete="off" spellcheck="false" />
+      </label>
+      <p class="hint tight" id="tokenHint"></p>
+
+      <div class="row-btns">
+        <button id="btnSaveToken">Save &amp; connect</button>
+        <button id="btnRecheck" class="ghost">Re-check</button>
+      </div>
       <div id="connState" class="state"></div>
     </div>
 
@@ -157,9 +184,10 @@
     <div class="card">
       <h2>Privacy</h2>
       <p class="hint">
-        Message text is read from the phone on demand and never uploaded.
-        Only parsed amounts, merchants and categories are stored, inside Medha,
-        on this device. There is no server and no account.
+        Message text is read from the phone on demand and never uploaded. Only
+        what is extracted — amounts, merchants, categories, due dates — is
+        stored, inside Medha, on this device. The API token is held by the
+        Sandeshika server process, never by this browser. No cloud, no account.
       </p>
       <button id="btnReset" class="danger">Delete all Lekha data</button>
     </div>

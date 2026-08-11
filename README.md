@@ -1,8 +1,8 @@
 # Sandeshika · సందేశిక
 
-*sandeśikā* — "messenger". A private spending tracker built from the bank SMS
-already on your phone. Installable PWA, served by a small Flask app, powered by
-**Medha** running on-device.
+*sandeśikā* — "messenger". Private insights from the SMS already on your phone:
+spending, bills and highlights. Installable PWA, served by a small Flask app,
+powered by **Medha** running on-device.
 
 Nothing leaves the device. No cloud, no account. Works in airplane mode.
 
@@ -20,11 +20,25 @@ mock model, so every screen is populated and the arithmetic is real:
 **Against your phone:**
 
 ```bash
-export MEDHA_TOKEN=<token from Medha -> API clients -> add "sandeshika">
 ./run.sh               # sets up adb forwarding, then serves on :5000
 ```
 
-Open **http://localhost:5000** and use the browser's *Install app* option.
+Open **http://localhost:5000**, go to **Setup**, and paste your Medha token.
+Set the **Medha address** to match the port shown in the Medha app — the
+default is `8080`, but if you changed it to `8001` put
+`http://127.0.0.1:8001` here.
+
+The token is validated before it is saved: a wrong port, an unreachable Medha
+and a rejected token each produce a specific message rather than `HTTP 401`.
+It is then stored **server-side** in `settings.json` (mode `0600`) and attached
+to outgoing requests. The browser never receives it — only a masked preview
+like `realto…cdef`.
+
+`MEDHA_TOKEN` / `MEDHA_URL` in the environment still work and take precedence;
+the Setup screen says so and disables the field rather than silently ignoring
+what you type.
+
+Then use the browser's *Install app* option to add it to your home screen.
 
 ---
 
@@ -150,7 +164,8 @@ Each produces a confident, plausible, wrong number — invisible in a demo.
 ## Layout
 
 ```
-app.py                    Flask: static host + allowlisted proxy + mock Medha
+app.py                    Flask: static host + allowlisted proxy + settings + mock Medha
+settings.json             saved token and Medha URL, mode 0600, gitignored
 static/index.html         PWA shell
 static/js/parser.js       deterministic SMS parser (no model)
 static/js/api.js          Medha client, resumable ingest
