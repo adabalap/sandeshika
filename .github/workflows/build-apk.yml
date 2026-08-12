@@ -15,12 +15,41 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SANDESHIKA_KEYSTORE_BASE64: ${{ secrets.SANDESHIKA_KEYSTORE_BASE64 }}
+    defaults:
+      run:
+        shell: bash
+
     steps:
       - uses: actions/checkout@v4
+
+      # The project may sit at the repo root, or one directory down if the
+      # release archive was extracted without flattening. Locate the Gradle
+      # build once rather than failing with "does not contain a Gradle build",
+      # which reads like a broken project but is only a path problem.
+      - name: Locate the Gradle build
+        id: root
+        run: |
+          set -euo pipefail
+          if [ -f settings.gradle.kts ]; then
+            DIR="."
+          else
+            DIR=$(find . -maxdepth 3 -name settings.gradle.kts -not -path "*/build/*" \
+                  -printf '%h\n' | head -1 || true)
+          fi
+          if [ -z "${DIR:-}" ]; then
+            echo "::error::No settings.gradle.kts anywhere in this repository."
+            echo "Extract the release archive so that settings.gradle.kts, app/ and gradlew"
+            echo "sit at the REPOSITORY ROOT, not inside a sandeshika-apk/ subfolder."
+            find . -maxdepth 3 -type d -not -path "*/.git*" | head -20
+            exit 1
+          fi
+          echo "dir=$DIR" >> "$GITHUB_OUTPUT"
+          echo "Gradle build found in: $DIR"
 
       # The bridge is reached by NAME from JavaScript, so a renamed or removed
       # @JavascriptInterface method fails only at runtime. Check the contract.
       - name: Verify JS/native bridge contract
+        working-directory: ${{ steps.root.outputs.dir }}
         run: |
           set -euo pipefail
           KT=app/src/main/java/com/adabala/sandeshika/MedhaBridge.kt
@@ -35,9 +64,11 @@ jobs:
           echo "bridge contract OK"
 
       - name: Check lifecycle overrides
+        working-directory: ${{ steps.root.outputs.dir }}
         run: python3 tools/check_overrides.py app/src
 
       - name: Bridge behaviour tests
+        working-directory: ${{ steps.root.outputs.dir }}
         run: node tests/bridge.test.js
 
       - uses: actions/setup-java@v4
@@ -46,6 +77,7 @@ jobs:
       - uses: android-actions/setup-android@v3
 
       - name: Ensure Gradle wrapper
+        working-directory: ${{ steps.root.outputs.dir }}
         run: |
           set -euo pipefail
           if [ -f ./gradlew ] && [ -f gradle/wrapper/gradle-wrapper.jar ]; then
@@ -61,6 +93,7 @@ jobs:
           chmod +x ./gradlew
 
       - name: Build debug APK
+        working-directory: ${{ steps.root.outputs.dir }}
         run: ./gradlew assembleDebug --stacktrace --no-daemon
 
       - name: Decode keystore
@@ -72,6 +105,7 @@ jobs:
 
       - name: Build release APK
         if: steps.signing.outputs.available == 'true'
+        working-directory: ${{ steps.root.outputs.dir }}
         env:
           SANDESHIKA_KEYSTORE_PATH: ${{ runner.temp }}/sandeshika.jks
           SANDESHIKA_KEYSTORE_PASSWORD: ${{ secrets.SANDESHIKA_KEYSTORE_PASSWORD }}
@@ -80,6 +114,7 @@ jobs:
         run: ./gradlew assembleRelease --stacktrace --no-daemon
 
       - name: Name the APKs
+        working-directory: ${{ steps.root.outputs.dir }}
         run: |
           set -euo pipefail
           mkdir -p dist
@@ -94,12 +129,12 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: sandeshika-apk
-          path: dist/*.apk
+          path: ${{ steps.root.outputs.dir }}/dist/*.apk
           if-no-files-found: error
 
       - name: Publish release (tags only)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.apk
+          files: ${{ steps.root.outputs.dir }}/dist/*.apk
           generate_release_notes: true
