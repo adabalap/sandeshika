@@ -67,9 +67,24 @@ jobs:
         working-directory: ${{ steps.root.outputs.dir }}
         run: python3 tools/check_overrides.py app/src
 
-      - name: Bridge behaviour tests
+      # api.js exists in two variants (Flask proxy vs native bridge). Copying
+      # the wrong one over the other compiles fine and fails only at runtime.
+      - name: Guard the Transport wiring
         working-directory: ${{ steps.root.outputs.dir }}
-        run: node tests/bridge.test.js
+        run: |
+          set -euo pipefail
+          API=app/src/main/assets/web/js/api.js
+          grep -q "Transport.api(path" "$API" \
+            || { echo "::error::$API is not wired to Transport — the Flask copy was synced over it"; exit 1; }
+          grep -q "fetch(MEDHA + path" "$API" \
+            && { echo "::error::$API still calls fetch() directly; it must go through Transport"; exit 1; }
+          echo "Transport wiring OK"
+
+      - name: Parser and bridge tests
+        working-directory: ${{ steps.root.outputs.dir }}
+        run: |
+          node tests/realcorpus.test.js
+          node tests/bridge.test.js
 
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '17' }

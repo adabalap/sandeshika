@@ -82,7 +82,6 @@ function isFinancialSender(address) {
 const REJECT_PRE = [
   { id: 'otp',        re: /\b(otp|one[\s-]?time\s*(password|pin)|verification code|do not share)\b/i },
   { id: 'promo',      re: /\b(offer|cashback up to|congratulations|win |sale |discount|apply now|click here|t&c apply|unsubscribe|limited period)\b/i },
-  { id: 'request',    re: /\b(is requesting|payment request|collect request|has requested money|approve.*request)\b/i },
   { id: 'balance',    re: /^(?=.*\b(avl|available|closing|a\/c)\s*(bal|balance)\b)(?!.*\b(debited|credited|spent|withdrawn|paid|received|sent)\b)/i },
   // Lookahead must scan the WHOLE message, not just what follows the phrase.
   // "Spent Rs.500 on Card 1234. Avbl Credit Limit: Rs.45,000" is a real
@@ -93,6 +92,40 @@ const REJECT_PRE = [
   // amount. Counting the hold and then the settlement double-counts.
   { id: 'hold',       re: /\b(hold (placed|amount)|pre-?auth|blocked (for|on)|authorization hold|temporarily blocked)\b/i },
   { id: 'emandate',   re: /\b(e-?mandate|standing instruction).*\b(registered|created|cancelled)\b/i },
+
+  // --- everything below was learned from a real inbox, where these accounted
+  // --- for the overwhelming majority of "unparseable" bank messages.
+
+  // Mandate lifecycle: setting up or cancelling an autopay is not a payment.
+  // "UPI Mandate: Sent Rs..." IS one, so this must not match a send.
+  { id: 'mandate',    re: /^(?=.*\b(mandate|autopay|standing instruction)\b)(?=.*\b(set|cancelled|registration|registered|created|failed|revoked)\b)(?!.*\bsent\b)/i },
+
+  // Payee/beneficiary administration.
+  { id: 'payee',      re: /\b(payee|beneficiary)\b.*\b(added|registered|activated)\b|\badded .{0,30}as a payee\b|\bafter 30 ?min|\bsince adding\b/i },
+
+  // Balance-threshold nags. Very high volume; carries a balance, not a txn.
+  { id: 'balance',    re: /\bbal(ance)? in .{0,40}a\/c\b.*\b(gone below|minimum limit)\b|\bmaintain rs\.?\s*[\d,]+ to avoid\b/i },
+
+  // Marketing, servicing and security notices.
+  { id: 'notice',     re: /\b(scheduled maintenance|will be unavailable|services (will be )?offline|re-?kyc|ckyc|has been (reactivated|generated)|logged into your|pin has been|address updation|e-?mail id verification|convert your .{0,30}into easy emis|smartemi|invites you|beware of|stay safe|fake|smishing|phishing|delink|reward points|hearty points|payback points|voucher|cashback\b.{0,20}\b(valid|earned)|download the app|visit (now|our)|t&cs?\b.{0,10}$)/i },
+
+  // Delivery and application status.
+  { id: 'status',     re: /\b(delivered|dispatched|received by|application|statement (generated|is ready)|e-?statement|unable to confirm|has moved to a new link)\b/i },
+
+  // Somebody asking to be paid is not a payment.
+  { id: 'request',    re: /\b(is requesting|payment request|collect request|has requested (money|payment)|approve.*request|requested payment (of|for))\b/i },
+
+  // Returned / reversed outgoing payments.
+  { id: 'returned',   re: /\b(returned on|has been unsuccessful|will be reversed|payment attempt .{0,20}unsuccessful)\b/i },
+];
+
+/**
+ * Declines carry no direction verb, so they were falling through to
+ * "no-direction" and polluting the template-drift signal. They belong in the
+ * pre-pass, where a reason can be reported honestly.
+ */
+const REJECT_DECLINE = [
+  { id: 'failed',     re: /\b(is declined|was declined|declined!|purchase declined|has failed|payment .{0,30}has failed|low funds|due to low funds|incorrect pin|txn .{0,20}declined)\b/i },
 ];
 
 /** Needs direction + refund context, so evaluated after those are known. */
@@ -102,7 +135,10 @@ const REJECT_POST = [
 ];
 
 /** Reject reasons that are ordinary inbox noise, not a broken bank template. */
-const EXPECTED_NOISE = ['otp', 'promo', 'request', 'reminder', 'balance', 'limit', 'emandate', 'hold'];
+const EXPECTED_NOISE = [
+  'otp', 'promo', 'request', 'reminder', 'balance', 'limit', 'emandate', 'hold',
+  'mandate', 'payee', 'notice', 'status', 'returned', 'failed',
+];
 
 /**
  * Refunds and reversals are credits that reference a failed or returned
@@ -130,6 +166,12 @@ const INTERNAL_RE = new RegExp([
   String.raw`\b(wallet|paytm|phonepe|amazon pay) (top[- ]?up|add(ed)? money|load)\b`,
   String.raw`\badded to your .{0,20}wallet\b`,
   String.raw`\bcred\b.{0,30}\bcard\b`,
+  // "payment of INR 47,719.43 towards ICICI Bank Credit Card Account XX5008
+  //  through Auto Debit from Account XX0570" -- the card spend was already
+  //  counted; booking the bill too double-counts the whole statement.
+  String.raw`\btowards\b.{0,40}\bcredit card\b`,
+  String.raw`\bauto ?debit\b.{0,40}\bcredit card\b`,
+  String.raw`\bcredit card\b.{0,30}\bthrough auto ?debit\b`,
 ].join('|'), 'i');
 
 // ---------------------------------------------------------------------------
@@ -182,7 +224,14 @@ function parseAmount(text) {
 // ---------------------------------------------------------------------------
 // Direction
 // ---------------------------------------------------------------------------
-const DEBIT_RE  = /\b(debited|spent|withdrawn|paid|purchase|deducted|sent to|transferred to|txn of)\b/i;
+/*
+ * Verbs taken from a real 5,000-message inbox, not invented.
+ *
+ * "Sent Rs.X From <bank> To <name>" is HDFC's standard UPI wording and was the
+ * single largest gap: hundreds of genuine payments were being discarded as
+ * "no-direction" because the list only had "sent to".
+ */
+const DEBIT_RE  = /\b(debited|spent|withdrawn|paid|purchase|deducted|sent|transferred to|txn of|charged|processed payment of|payment of|done for)\b/i;
 const CREDIT_RE = /\b(credited|received|deposited|refund(ed)?|reversal|cashback of|added to)\b/i;
 
 function parseDirection(text) {
@@ -259,6 +308,15 @@ function parseRef(text) {
 const MERCHANT_PATTERNS = [
   /\bto\s+vpa\s+([^\s;,.]+)/i,
   /\bvpa\s+([^\s;,.]+)/i,
+  // HDFC UPI variant with no "On" before the date: "To Google Play 07/08/26"
+  /\bTo\s+([^\n]{2,40}?)\s+\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\b/i,
+  // HDFC UPI: "Sent Rs.X From HDFC Bank A/C *5261 To <name> On 10/08/26 Ref N"
+  // Anchored on "To ... On <date>" so the bank's own name is never taken.
+  /\bTo\s+([^\n]{2,40}?)\s+On\s+\d{1,2}[\/\-]/i,
+  // "processed payment of INR X to Merchant <name>, as per Standing Instruction"
+  /\bto\s+Merchant\s+([^,;.]{2,40})/i,
+  // PayU: "for Rs. 80.00 done for BOTTLE LAB TECHNOLOGIES PRI..."
+  /\bdone for\s+([^,;.]{2,40}?)(?:\.{2,}|\s+has\b|[,;.]|$)/i,
   /\btrf\s+to\s+([^;,.]+?)(?=\s+(?:ref|refno|on|upi|rrn)\b|[;,.]|$)/i,
   /\bat\s+([A-Z0-9][^;,.]{2,40}?)(?=\s+on\b|\s+ref\b|[;,.]|$)/i,
   /\bto\s+([A-Z0-9][^;,.]{2,40}?)(?=\s+on\b|\s+ref\b|\s+upi\b|[;,.]|$)/i,
@@ -307,6 +365,12 @@ function parseMerchant(text) {
     }
 
     raw = raw.replace(AGGREGATORS, '');
+    // Trailing date or reference left over when the bank omits "On"/"Ref"
+    // separators, e.g. "To Google Play 07/08/26".
+    raw = raw
+      .replace(/\s+\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\s*$/, '')
+      .replace(/\s+(?:on|ref|refno|upi|rrn)\b.*$/i, '')
+      .trim();
 
     raw = raw
       .replace(/[_.\-]+/g, ' ')
@@ -409,7 +473,7 @@ function parse(sms) {
   if (!text) return { ok: false, reason: 'empty' };
 
   // Pass 1: rejections that do not depend on direction.
-  for (const r of REJECT_PRE) {
+  for (const r of REJECT_PRE.concat(REJECT_DECLINE)) {
     if (r.re.test(text)) return { ok: false, reason: r.id };
   }
 
@@ -516,8 +580,8 @@ const MERCHANT_RULES = [
   [/uber|ola|rapido|irctc|redbus|metro|petrol|fuel|hpcl|bpcl|iocl|indian oil|shell|parking|fastag/i, 'transport'],
   [/amazon|flipkart|myntra|ajio|meesho|nykaa|tatacliq|snapdeal|lenskart|decathlon/i, 'shopping'],
   [/airtel|jio|vodafone|vi |bsnl|electricity|water|gas|broadband|dth|tata power|adani|bescom|torrent power|recharge|postpaid|prepaid/i, 'bills'],
-  [/netflix|spotify|hotstar|prime video|sonyliv|zee5|bookmyshow|pvr|inox|youtube premium|gaming/i, 'entertainment'],
-  [/pharmacy|apollo|medplus|1mg|pharmeasy|hospital|clinic|diagnostic|lab|practo|doctor/i, 'health'],
+  [/netflix|spotify|hotstar|prime video|sonyliv|zee5|bookmyshow|pvr|inox|youtube|gaming|google play|play store|app ?store|itunes|apple\.com/i, 'entertainment'],
+  [/pharmacy|apollo|medplus|1mg|pharmeasy|hospital|clinic|diagnostics?\b|path\s?lab|labs\b|practo|doctor|medical/i, 'health'],
   [/school|college|university|tuition|byju|unacademy|vedantu|coursera|udemy|fees/i, 'education'],
   [/makemytrip|goibibo|cleartrip|yatra|airbnb|oyo|indigo|vistara|air india|spicejet|hotel|booking\.com/i, 'travel'],
   [/zerodha|groww|upstox|kuvera|coin|mutual fund|sip |nps |ppf|rd |fd |smallcase|angel one/i, 'investment'],
@@ -525,10 +589,30 @@ const MERCHANT_RULES = [
   [/self|own account|transfer to|neft|imps|rtgs/i, 'transfer'],
 ];
 
+/**
+ * Looks like a person rather than a business: two or more capitalised words,
+ * no company suffix, no digits. UPI to an individual is usually a transfer, not
+ * a purchase -- but this is a GUESS, so it is marked low-confidence and the
+ * caller sends it to review rather than silently reshaping the totals.
+ */
+function looksPersonal(merchant) {
+  const m = String(merchant || '').trim();
+  if (!m || /\d/.test(m)) return false;
+  if (/\b(ltd|limited|pvt|private|inc|llp|corp|company|store|stores|enterprises|technologies|services|solutions|bank|traders|agencies|mart|hospital|hotel)\b/i.test(m)) return false;
+  const words = m.split(/\s+/).filter(Boolean);
+  if (words.length < 2 || words.length > 5) return false;
+  return words.every((w) => /^(?:[A-Z][a-z]*|[A-Z]{2,})$/.test(w));
+}
+
 function categorise(merchant, direction) {
   if (!merchant) return direction === 'credit' ? { category: 'income', source: 'rule' } : null;
   for (const [re, cat] of MERCHANT_RULES) {
     if (re.test(merchant)) return { category: cat, source: 'rule' };
+  }
+  // Debits only: an incoming payment from a person is still income to the
+  // user, and treating it as a transfer silently removes it from the totals.
+  if (direction === 'debit' && looksPersonal(merchant)) {
+    return { category: 'transfer', source: 'guess' };
   }
   return null; // caller falls back to the LLM
 }
@@ -544,7 +628,7 @@ function merchantKey(merchant) {
 
 const API = {
   parse, categorise, merchantKey, fingerprint,
-  normaliseSender, senderBank, isFinancialSender, vpaQuality, parseForeign,
+  normaliseSender, senderBank, isFinancialSender, vpaQuality, parseForeign, looksPersonal,
   REFUND_RE, INTERNAL_RE,
   parseAmount, parseDirection, parseMerchant, parseDate, parseRef,
   parseAccount, parseChannel, parseBalance,

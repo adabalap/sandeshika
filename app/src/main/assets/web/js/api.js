@@ -52,11 +52,12 @@ async function api(path, opts = {}) {
     'Content-Type': 'application/json',
     ...(opts.headers || {}),
   };
-  // No Authorization header here in either mode: the native bridge (APK) or
-  // the Flask proxy (browser) attaches it, so the token never enters JS.
+  // No Authorization header: the server attaches it.
 
   let r;
   try {
+    // Transport picks the native bridge (APK) or the Flask proxy (browser).
+    // Either way the token is attached outside JS.
     r = await Transport.api(path, { ...opts, headers });
   } catch (e) {
     throw new ApiError(e.message || 'Cannot reach Medha.', 0, 0);
@@ -236,6 +237,14 @@ async function ingestPage(messages, known, soft, onWait, drift) {
       const cat = await resolveCategory(r.txn.merchant, r.txn.direction, onWait);
       r.txn.category = cat.category;
       r.txn.categorySource = cat.source;
+      // A heuristic guess (e.g. "this looks like a person, so a transfer")
+      // changes whether the amount counts as spending. That is too big an
+      // effect to apply silently, so it goes to the review queue.
+      if (cat.source === 'guess') {
+        r.txn.kind = 'transfer';
+        r.txn.needsReview = true;
+        r.txn.reviewReasonOverride = 'paid to what looks like a person — spend or transfer?';
+      }
     }
 
     toWrite.push({ key: Keys.txn(r.txn.fingerprint), value: JSON.stringify(r.txn) });
