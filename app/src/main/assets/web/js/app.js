@@ -402,6 +402,214 @@
     if (kind === 'info') setTimeout(() => b.classList.add('hidden'), 4000);
   }
 
+
+  // ======================================================================
+  // Inbox organiser
+  //
+  // Messages are read LIVE from Medha and never copied into storage. The
+  // system SMS provider is already the source of truth; a second copy is one
+  // more thing to secure, keep in sync, and get wrong.
+  // ======================================================================
+  const O = window.SandeshikaOrganizer;
+  let inbox = [];            // { sms, cls } for the loaded window
+  let box = 'transactions';
+  let inboxLimit = 40;
+  let bills = [];
+
+  const BOX_EMPTY = {
+    transactions: 'No transactions in the loaded messages.',
+    bills: 'No bills or due dates found.',
+    updates: 'No delivery, travel or service updates.',
+    promotions: 'No promotional messages. Enjoy the quiet.',
+    personal: 'No personal messages — these come from numeric senders.',
+    spam: 'Nothing flagged as spam.',
+  };
+
+  async function loadInbox(limit = 400) {
+    $('#inboxEmptyCard').hidden = true;
+    $('#inboxCount').textContent = 'Loading…';
+    try {
+      const page = await api('/connectors/sms/messages?limit=' + limit);
+      inbox = page.messages.map((m) => ({ sms: m, cls: O.classify(m) }));
+      await refreshBills();
+      renderInbox();
+    } catch (e) {
+      $('#inboxEmptyCard').hidden = false;
+      banner(friendly(e), 'error');
+      $('#inboxCount').textContent = '';
+    }
+  }
+
+  function renderInbox() {
+    const q = $('#inboxSearch').value.trim().toLowerCase();
+    const rows = inbox
+      .filter((r) => r.cls.tab === box)
+      .filter((r) => !q || r.sms.body.toLowerCase().includes(q)
+        || String(r.sms.address).toLowerCase().includes(q));
+
+    const counts = {};
+    inbox.forEach((r) => { counts[r.cls.tab] = (counts[r.cls.tab] || 0) + 1; });
+    $$('#inboxTabs .chip').forEach((c) => {
+      const n = counts[c.dataset.box] || 0;
+      c.textContent = c.dataset.box.charAt(0).toUpperCase() + c.dataset.box.slice(1)
+        + (n ? ` ${n}` : '');
+      c.classList.toggle('sel', c.dataset.box === box);
+    });
+    $('#inboxCount').textContent = `${rows.length} of ${inbox.length} messages loaded`;
+
+    $('#inboxList').innerHTML = rows.slice(0, inboxLimit).map((r) => {
+      const t = r.cls.txn;
+      // An OTP code is never rendered. Repeating a one-time code in a list or
+      // a digest is exactly what makes OTP phishing work.
+      const body = r.cls.sensitive
+        ? '<em>One-time code received — hidden for safety</em>'
+        : esc(r.sms.body).replace(/\n/g, ' ');
+      return `
+      <div class="row">
+        <span class="dot" style="background:${boxColor(r.cls.tab)}"></span>
+        <div class="row-main">
+          <strong>${esc(SandeshikaParser.senderBank(r.sms.address) || r.sms.address)}</strong>
+          <span class="row-sub">${fmtDate(r.sms.date)} · ${esc(r.cls.subtype)}</span>
+          <span class="raw">${body}</span>
+        </div>
+        ${t ? `<span class="row-amt ${t.direction}">${t.direction === 'debit' ? '−' : '+'}${inr(t.amount)}</span>` : ''}
+      </div>`;
+    }).join('') || `<p class="empty">${BOX_EMPTY[box] || 'Nothing here.'}</p>`;
+
+    $('#inboxMore').classList.toggle('hidden', rows.length <= inboxLimit);
+  }
+
+  const boxColor = (tab) => ({
+    transactions: '#1FAE7A', bills: '#E8635A', updates: '#4C8DF6',
+    promotions: '#F4A62E', personal: '#B569E8', spam: '#8896A6',
+  }[tab] || '#A0AAB6');
+
+  // ---------------------------- bills ----------------------------
+
+  async function refreshBills() {
+    const found = new Map();
+    for (const r of inbox) {
+      if (r.cls.tab !== O.TAB.BILLS) continue;
+      const b = O.extractBill(r.sms);
+      // One bill produces several reminders; the fingerprint collapses them,
+      // and the newest sighting wins because amounts get revised.
+      if (b && (!found.has(b.fingerprint) || found.get(b.fingerprint).seenAt < b.seenAt)) {
+        found.set(b.fingerprint, b);
+      }
+    }
+    // Merge stored status (paid / dismissed) over freshly parsed bills.
+    let saved = {};
+    try {
+      const rows = await SandeshikaApi.listPrefix('bill/', 500);
+      rows.forEach((r) => { try { saved[r.key.replace(/^bill\//, '')] = JSON.parse(r.value); } catch (_) {} });
+    } catch (_) {}
+
+    bills = [...found.values()].map((b) => ({ ...b, ...(saved[b.fingerprint] || {}) }));
+    renderBills();
+  }
+
+  function renderBills() {
+    const now = Date.now();
+    const open = bills.filter((b) => b.status === 'open')
+      .sort((a, b) => (a.dueAt || Infinity) - (b.dueAt || Infinity));
+    const done = bills.filter((b) => b.status !== 'open');
+
+    const soon = open.filter((b) => {
+      const d = O.daysUntil(b.dueAt, now);
+      return d !== null && d >= 0 && d <= 7;
+    });
+    const late = open.filter((b) => {
+      const d = O.daysUntil(b.dueAt, now);
+      return b.overdue || (d !== null && d < 0);
+    });
+
+    $('#kpiDueSoon').textContent = soon.length ? inr(soon.reduce((s, b) => s + (b.amount || 0), 0)) : '—';
+    $('#kpiDueSoonSub').textContent = soon.length ? `${soon.length} bill${soon.length > 1 ? 's' : ''}` : 'nothing due';
+    $('#kpiOverdue').textContent = late.length ? inr(late.reduce((s, b) => s + (b.amount || 0), 0)) : '—';
+    $('#kpiOverdueSub').textContent = late.length ? `${late.length} overdue` : 'all clear';
+    $('#kpiOverdue').className = late.length ? 'neg' : '';
+
+    const row = (b) => {
+      const d = O.daysUntil(b.dueAt, now);
+      const when = d === null ? 'no date found'
+        : d < 0 ? `${Math.abs(d)} day${Math.abs(d) > 1 ? 's' : ''} overdue`
+        : d === 0 ? 'due today' : `due in ${d} day${d > 1 ? 's' : ''}`;
+      return `
+      <div class="row" data-fp="${esc(b.fingerprint)}">
+        <span class="dot" style="background:${d !== null && d < 3 ? '#E8635A' : '#F4A62E'}"></span>
+        <div class="row-main">
+          <strong>${esc(b.issuer)}${b.account ? ' ••' + esc(b.account) : ''}</strong>
+          <span class="row-sub">${esc(b.kind)} · ${when}${
+            b.minimumDue ? ' · min ' + inr(b.minimumDue) : ''}</span>
+        </div>
+        <span class="row-amt debit">${b.amount ? inrExact(b.amount) : '—'}</span>
+        ${b.status === 'open'
+          ? '<button class="mini ok" data-bill="paid">Paid</button>'
+          : '<button class="mini" data-bill="reopen">Undo</button>'}
+      </div>`;
+    };
+    $('#billList').innerHTML = open.map(row).join('') || '<p class="empty">No bills outstanding.</p>';
+    $('#billDone').innerHTML = done.map(row).join('') || '<p class="empty">Nothing settled yet.</p>';
+  }
+
+  async function setBillStatus(fp, status) {
+    const b = bills.find((x) => x.fingerprint === fp);
+    if (!b) return;
+    b.status = status;
+    try {
+      await api('/store/bill/' + encodeURIComponent(fp), {
+        method: 'PUT',
+        body: JSON.stringify({ status, updatedAt: Date.now() }),
+      });
+    } catch (e) { banner(friendly(e), 'error'); }
+    renderBills();
+  }
+
+  // ---------------------------- export ----------------------------
+
+  function download(name, text, type) {
+    const url = URL.createObjectURL(new Blob([text], { type }));
+    const a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function csvCell(v) {
+    const s = String(v ?? '');
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+
+  function exportCsv() {
+    if (!txns.length) return banner('Nothing to export yet', 'error');
+    const cols = ['date', 'kind', 'direction', 'amount', 'currency', 'merchant',
+                  'category', 'categorySource', 'channel', 'account', 'bank', 'ref',
+                  'confidence', 'needsReview'];
+    const lines = [cols.join(',')];
+    for (const t of txns.slice().sort((a, b) => a.date - b.date)) {
+      lines.push(cols.map((c) => csvCell(
+        c === 'date' ? new Date(t.date).toISOString() : t[c])).join(','));
+    }
+    download(`sandeshika-transactions-${new Date().toISOString().slice(0, 10)}.csv`,
+             lines.join('\n'), 'text/csv');
+    banner(`Exported ${txns.length} transactions`);
+  }
+
+  function exportJson() {
+    const payload = {
+      app: 'Sandeshika',
+      exportedAt: new Date().toISOString(),
+      // Stated so a future reader knows what the numbers mean without the app.
+      notes: 'Amounts in INR. kind: expense | income | refund | transfer. '
+           + 'Transfers and investments are excluded from spending totals.',
+      transactions: txns,
+      bills,
+    };
+    download(`sandeshika-export-${new Date().toISOString().slice(0, 10)}.json`,
+             JSON.stringify(payload, null, 2), 'application/json');
+    banner(`Exported ${txns.length} transactions and ${bills.length} bills`);
+  }
+
   // ------------------------------ boot ------------------------------
   async function reload() {
     try {
@@ -461,10 +669,19 @@
     btn.disabled = true;
     el.innerHTML = '<span class="warn">Checking…</span>';
     try {
-      await Transport.saveSettings($('#medhaUrl').value.trim(), $('#tokenInput').value.trim());
+      const r = await fetch('/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          medhaUrl: $('#medhaUrl').value.trim(),
+          token: $('#tokenInput').value.trim(),
+        }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
       $('#tokenInput').value = '';
       banner('Connected to Medha');
-      cfg = await Transport.config();
+      cfg = await fetch('/config.json').then((x) => x.json());
       renderSettingsForm();
       await checkConnection();
       await reload();
@@ -478,7 +695,7 @@
   async function checkConnection() {
     const el = $('#connState');
     try {
-      cfg = await Transport.config();
+      cfg = await fetch('/config.json').then((r) => r.json());
       renderSettingsForm();
       if (!cfg.mock && !cfg.tokenConfigured) {
         el.innerHTML = '<span class="warn">No token saved yet — paste one above.</span>';
@@ -531,6 +748,9 @@
     t.classList.add('active');
     $$('.view').forEach((v) => v.classList.add('hidden'));
     $('#view-' + t.dataset.view).classList.remove('hidden');
+    // Lazily: reading 400 messages on boot would slow the first paint for
+    // someone who only wants the spending summary.
+    if ((t.dataset.view === 'inbox' || t.dataset.view === 'bills') && !inbox.length) loadInbox();
   }));
 
   $$('.period .chip').forEach((c) => c.addEventListener('click', () => {
@@ -545,6 +765,26 @@
   $('#filterCat').addEventListener('change', renderTxns);
   $('#loadMore').addEventListener('click', () => { listLimit += 100; renderTxns(); });
 
+  // inbox
+  $('#btnLoadInbox').addEventListener('click', () => loadInbox());
+  $('#inboxSearch').addEventListener('input', () => { inboxLimit = 40; renderInbox(); });
+  $('#inboxMore').addEventListener('click', () => { inboxLimit += 60; renderInbox(); });
+  $$('#inboxTabs .chip').forEach((c) => c.addEventListener('click', () => {
+    box = c.dataset.box; inboxLimit = 40; renderInbox();
+  }));
+  $('#billList').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-bill]');
+    if (b) setBillStatus(b.closest('.row').dataset.fp, 'paid');
+  });
+  $('#billDone').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-bill]');
+    if (b) setBillStatus(b.closest('.row').dataset.fp, 'open');
+  });
+
+  // export
+  $('#btnExportCsv').addEventListener('click', exportCsv);
+  $('#btnExportJson').addEventListener('click', exportJson);
+
   $('#btnAsk').addEventListener('click', ask);
   $$('.chip.q').forEach((c) => c.addEventListener('click', () => {
     $('#askInput').value = c.textContent;
@@ -555,7 +795,7 @@
   $('#btnClearSaved').addEventListener('click', async () => {
     if (!confirm('Forget the saved token and address, and fall back to how the server was started?')) return;
     try {
-      await Transport.clearSettings();
+      await fetch('/settings', { method: 'DELETE' });
       banner('Saved settings cleared');
       await checkConnection();
     } catch (e) { banner(friendly(e), 'error'); }

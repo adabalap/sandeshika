@@ -80,10 +80,26 @@ jobs:
             && { echo "::error::$API still calls fetch() directly; it must go through Transport"; exit 1; }
           echo "Transport wiring OK"
 
+      # index.html exists in two copies (Flask and APK). A view added to one and
+      # not the other fails only when the user taps that tab.
+      - name: Check the APK page matches app.js
+        working-directory: ${{ steps.root.outputs.dir }}
+        run: |
+          node -e "
+          const fs=require('fs');
+          const h=fs.readFileSync('app/src/main/assets/web/index.html','utf8');
+          const j=fs.readFileSync('app/src/main/assets/web/js/app.js','utf8');
+          const ids=new Set([...h.matchAll(/id=\"([\w-]+)\"/g)].map(m=>m[1]));
+          const used=new Set([...j.matchAll(/\\\\$\('#([\w-]+)'\)/g)].map(m=>m[1]));
+          const miss=[...used].filter(u=>!ids.has(u));
+          if(miss.length){console.error('::error::index.html is missing: '+miss.join(', '));process.exit(1);}
+          console.log('OK '+used.size+' element ids resolve');"
+
       - name: Parser and bridge tests
         working-directory: ${{ steps.root.outputs.dir }}
         run: |
           node tests/realcorpus.test.js
+          node tests/organizer.test.js
           node tests/bridge.test.js
 
       - uses: actions/setup-java@v4

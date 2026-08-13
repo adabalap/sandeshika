@@ -28,7 +28,9 @@
 
 <nav class="tabs" role="tablist">
   <button class="tab active" data-view="overview" role="tab">Overview</button>
-  <button class="tab" data-view="transactions" role="tab">Transactions</button>
+  <button class="tab" data-view="inbox" role="tab">Inbox</button>
+  <button class="tab" data-view="bills" role="tab">Bills</button>
+  <button class="tab" data-view="transactions" role="tab">Spends</button>
   <button class="tab" data-view="ask" role="tab">Ask</button>
   <button class="tab" data-view="setup" role="tab">Setup</button>
 </nav>
@@ -94,6 +96,57 @@
     </div>
     <div id="txnList" class="rows"></div>
     <button id="loadMore" class="ghost hidden">Show more</button>
+  </section>
+
+  <!-- ============================= INBOX ============================= -->
+  <section id="view-inbox" class="view hidden">
+    <div class="period" id="inboxTabs">
+      <button class="chip sel" data-box="transactions">Spends</button>
+      <button class="chip" data-box="bills">Bills</button>
+      <button class="chip" data-box="updates">Updates</button>
+      <button class="chip" data-box="promotions">Promotions</button>
+      <button class="chip" data-box="personal">Personal</button>
+      <button class="chip" data-box="spam">Spam</button>
+    </div>
+    <input id="inboxSearch" type="search" placeholder="Search messages…" />
+    <p class="hint tight" id="inboxCount"></p>
+    <div id="inboxList" class="rows"></div>
+    <button id="inboxMore" class="ghost hidden">Show more</button>
+    <div class="card" id="inboxEmptyCard">
+      <p class="hint">
+        Nothing loaded yet. The inbox reads messages live from Medha — it never
+        copies them into storage. Run the import in Setup first.
+      </p>
+      <button id="btnLoadInbox">Load messages</button>
+    </div>
+  </section>
+
+  <!-- ============================= BILLS ============================= -->
+  <section id="view-bills" class="view hidden">
+    <div class="cards">
+      <div class="card kpi out">
+        <span class="k">Due in 7 days</span>
+        <strong id="kpiDueSoon">—</strong>
+        <span class="sub" id="kpiDueSoonSub"></span>
+      </div>
+      <div class="card kpi net">
+        <span class="k">Overdue</span>
+        <strong id="kpiOverdue">—</strong>
+        <span class="sub" id="kpiOverdueSub"></span>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Upcoming</h2>
+      <p class="hint">
+        Extracted from bill reminders in your inbox. Marking one paid only hides
+        it here — it does not pay anything.
+      </p>
+      <div id="billList" class="rows"></div>
+    </div>
+    <div class="card">
+      <h2>Settled</h2>
+      <div id="billDone" class="rows"></div>
+    </div>
   </section>
 
   <!-- ============================== ASK ============================== -->
@@ -190,6 +243,15 @@
         stored, inside Medha, on this device. The API token is held by the
         Sandeshika server process, never by this browser. No cloud, no account.
       </p>
+      <h2 style="margin-top:18px">Export</h2>
+      <p class="hint">
+        Your data, in open formats, whenever you want it. Nothing here is
+        proprietary and nothing is locked in.
+      </p>
+      <div class="row-btns">
+        <button id="btnExportCsv" class="ghost">Transactions CSV</button>
+        <button id="btnExportJson" class="ghost">Everything JSON</button>
+      </div>
       <button id="btnReset" class="danger">Delete all Sandeshika data</button>
     </div>
   </section>
@@ -197,6 +259,7 @@
 
 <script src="js/bridge.js"></script>
 <script src="js/parser.js"></script>
+<script src="js/organizer.js"></script>
 <script src="js/api.js"></script>
 <script src="js/app.js"></script>
 
