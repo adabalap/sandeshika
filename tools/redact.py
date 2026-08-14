@@ -44,14 +44,33 @@ patterns; it cannot catch "paid to Ramesh" written in an unexpected way.
 """
 
 import argparse
+import datetime
 import hashlib
 import os
+import random
 import re
 import sys
 from collections import Counter
 
 SALT = os.urandom(16).hex()
 COUNTS = Counter()
+
+# Dates are shifted by a consistent random offset rather than blanked.
+#
+# Blanking them to 99/99/99 destroys the one thing a parser bug report needs:
+# the date FORMAT, and whether the parser read it correctly. A constant offset
+# preserves the format, the ordering, the gaps between transactions and the
+# day-of-week pattern, while making the actual calendar dates wrong -- which is
+# all the privacy that a transaction date needs.
+#
+# Set --blank-dates if you would rather lose the signal than shift it.
+DATE_SHIFT_DAYS = random.randint(400, 1200) * random.choice([-1, 1])
+BLANK_DATES = False
+
+
+def normaliseSender(address: str) -> str:
+    """Strips the TRAI operator prefix: AX-HDFCBK -> HDFCBK."""
+    return re.sub(r"^[A-Z]{2}[-\s]", "", str(address or "").upper())
 
 
 def tag(kind: str, value: str, width: int = 4) -> str:
@@ -109,6 +128,58 @@ def looks_like_name(s: str) -> bool:
     return any(w[:1].isupper() for w in real)
 
 
+MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+       "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+MON_IDX = {m.lower(): i for i, m in enumerate(MON)}
+
+
+def _shifted(day, month, year):
+    """Applies the run's constant offset. Returns None if the date is not real."""
+    y = year + 2000 if year < 100 else year
+    try:
+        d = datetime.date(y, month, day) + datetime.timedelta(days=DATE_SHIFT_DAYS)
+    except ValueError:
+        return None
+    return d
+
+
+def _shift_numeric(m):
+    # Indian convention is day-first; the shift keeps whichever order was used
+    # by writing the parts back into the same slots.
+    d = _shifted(int(m.group(1)), int(m.group(3)), int(m.group(4)))
+    if not d:
+        return m.group(0)
+    sep = m.group(2)
+    yr = m.group(4)
+    y = f"{d.year % 100:02d}" if len(yr) == 2 else str(d.year)
+    return f"{d.day:02d}{sep}{d.month:02d}{sep}{y}"
+
+
+def _shift_daymon(m):
+    mon = MON_IDX.get(m.group(3).lower())
+    if mon is None:
+        return m.group(0)
+    d = _shifted(int(m.group(1)), mon + 1, int(m.group(6)))
+    if not d:
+        return m.group(0)
+    name = MON[d.month - 1]
+    if m.group(3).isupper():
+        name = name.upper()
+    y = f"{d.year % 100:02d}" if len(m.group(6)) == 2 else str(d.year)
+    return f"{d.day:02d}{m.group(2)}{name}{m.group(4)}{m.group(5)}{y}"
+
+
+def _shift_mondaY(m):
+    """Month-name-first: 'Feb 24, 2025'."""
+    mon = MON_IDX.get(m.group(1).lower())
+    if mon is None:
+        return m.group(0)
+    d = _shifted(int(m.group(2)), mon + 1, int(m.group(3)))
+    if not d:
+        return m.group(0)
+    return f"{MON[d.month - 1]} {d.day:02d}, {d.year}"
+
+
 def redact(text: str) -> str:
     t = text
 
@@ -159,9 +230,15 @@ def redact(text: str) -> str:
     t = sub(r"([\d,]+(?:\.\d{1,2})?)(\s*(?:INR|Rs\.?|₹))",
             lambda m: re.sub(r"\d", "9", m.group(1)) + m.group(2), t, "amount", flags=re.I)
 
-    # ---- dates ----
-    t = sub(r"\b\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}\b", "99/99/99", t, "date")
-    t = sub(r"\b\d{1,2}[\s\-]?[A-Za-z]{3}[\s\-]?\d{2,4}\b", "99-XXX-99", t, "date")
+    # ---- dates: shifted, not destroyed ----
+    if BLANK_DATES:
+        t = sub(r"\b\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}\b", "99/99/99", t, "date")
+        t = sub(r"\b\d{1,2}[\s\-]?[A-Za-z]{3}[\s\-]?\d{2,4}\b", "99-XXX-99", t, "date")
+    else:
+        t = sub(r"\b(\d{1,2})([/\-])(\d{1,2})\2(\d{2,4})\b", _shift_numeric, t, "date")
+        t = sub(r"\b(\d{1,2})([\s\-/]?)([A-Za-z]{3})([a-z]*)([\s\-/]?)(\d{2,4})\b",
+                _shift_daymon, t, "date")
+        t = sub(r"\b([A-Za-z]{3})[a-z]*\s+(\d{1,2}),?\s+(\d{4})\b", _shift_mondaY, t, "date")
     t = sub(r"\b\d{1,2}:\d{2}(:\d{2})?\b", "99:99", t, "time")
 
     # ---- names, last: everything above has already been neutralised ----
@@ -204,6 +281,8 @@ LEAKS = [
     ("live URL path", r"https?://(?!REDACTED)[^\s]{6,}"),
     ("unmasked amount", r"(?:INR|Rs\.?|₹)\s*\d*[1-8]\d*"),
 ]
+# Dates are intentionally left looking real after shifting, so they must not be
+# reported as leaks. They are not PII once the offset is unknown.
 
 # The redactor writes 9s and fixed placeholders. Those match several leak
 # patterns, and reporting them would train the reader to ignore the warnings —
@@ -297,10 +376,15 @@ def main():
     ap.add_argument("--verify", action="store_true", help="scan a file for leftover PII")
     ap.add_argument("--selftest", action="store_true", help="prove the rules work")
     ap.add_argument("--quiet", action="store_true", help="suppress the summary")
+    ap.add_argument("--blank-dates", action="store_true",
+                    help="replace dates with 99/99/99 instead of shifting them "
+                         "(loses the format, so parser date bugs become invisible)")
     args = ap.parse_args()
 
+    global BLANK_DATES
     if args.salt:
         SALT = args.salt
+    BLANK_DATES = args.blank_dates
     if args.selftest:
         sys.exit(selftest())
 

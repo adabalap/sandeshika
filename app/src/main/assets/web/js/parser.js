@@ -285,6 +285,14 @@ function parseDate(text, fallbackMs) {
     const d = new Date(norm(+m[3]), +m[2] - 1, +m[1]);
     if (!isNaN(d) && +m[2] <= 12) return d.getTime();
   }
+  // "Feb 24, 2025" / "Aug 06 2024" -- month name FIRST. Common in telecom and
+  // wallet messages, and previously unmatched, so those transactions silently
+  // took the SMS arrival time instead of the date they state.
+  m = text.match(/\b([a-z]{3})[a-z]*\s+(\d{1,2}),?\s+(\d{4})\b/i);
+  if (m && MONTHS[m[1].toLowerCase()] !== undefined) {
+    const d = new Date(+m[3], MONTHS[m[1].toLowerCase()], +m[2]);
+    if (!isNaN(d)) return d.getTime();
+  }
   // 2025-08-05
   m = text.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
   if (m) {

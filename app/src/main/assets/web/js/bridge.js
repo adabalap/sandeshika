@@ -89,6 +89,12 @@
       return j;
     },
 
+    async detect() {
+      if (!native) return fetch('/detect').then((r) => r.json());
+      const r = await nativeCall('detect');
+      return r.body ? JSON.parse(r.body) : { found: [] };
+    },
+
     async clearSettings() {
       if (!native) return fetch('/settings', { method: 'DELETE' }).then((r) => r.json());
       const r = await nativeCall('clearSettings');

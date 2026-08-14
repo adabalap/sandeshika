@@ -78,7 +78,17 @@ const srv = http.createServer((req, res) => {
     },
     saveSettings: (id, url, token) => {
       const use = (token || '').trim() || savedToken;
-      if (!/^https?:\/\/[\w.\-]+(:\d{1,5})?$/.test(url)) return finish(id, 400, JSON.stringify({ error: 'bad url' }));
+      const m = /^(https?):\/\/([^/:\s]+)(?::(\d{1,5}))?\/?$/.exec(url);
+      if (!m) return finish(id, 400, JSON.stringify({ error: 'bad url form' }));
+      const host = m[2], port = m[3];
+      if (/^[0-9.]+$/.test(host)) {
+        const parts = host.split('.');
+        if (parts.length !== 4 || parts.some((p) => !(Number(p) >= 0 && Number(p) <= 255)))
+          return finish(id, 400, JSON.stringify({ error: `'${host}' is not a valid IP address` }));
+        if (host === '127.0.0.0')
+          return finish(id, 400, JSON.stringify({ error: '127.0.0.0 is the loopback network, not an address' }));
+      }
+      if (!port) return finish(id, 400, JSON.stringify({ error: 'Include the port' }));
       if (!use) return finish(id, 400, JSON.stringify({ error: 'A Medha API token is required' }));
       fetch(url + '/store?prefix=meta/&limit=1', { headers: { Authorization: 'Bearer ' + use } })
         .then(r => {
@@ -88,6 +98,7 @@ const srv = http.createServer((req, res) => {
         }).catch(e => finish(id, 502, JSON.stringify({ error: 'unreachable' })));
     },
     clearSettings: (id) => { savedToken = ''; finish(id, 200, JSON.stringify({ cleared: true })); },
+    detect: (id) => finish(id, 200, JSON.stringify({ found: [{ url: base, modelLoaded: true, tokenOk: !!savedToken }] })),
   };
   const finish = (id, status, body) =>
     setTimeout(() => global.__medhaResolve(id, JSON.stringify({ status, body })), 0);
@@ -109,6 +120,17 @@ const srv = http.createServer((req, res) => {
   try { await global.Transport.saveSettings(base, 'wrongtoken'); ok('bad token refused', false); }
   catch (e) { ok('bad token refused', /rejected/.test(e.message), e.message); }
 
+  // address validation must reject the near-miss typo before any network call
+  for (const [bad, why] of [
+    ['http://127.0.0.0:8001', 'loopback network'],
+    ['http://127.0.0:8001', 'invalid IP'],
+    ['http://127.0.0.1', 'missing port'],
+  ]) {
+    let rejected = false;
+    try { await global.Transport.saveSettings(bad, TOKEN); } catch (_) { rejected = true; }
+    ok(`rejects ${bad} (${why})`, rejected, 'it was accepted');
+  }
+
   // good token
   await global.Transport.saveSettings(base, TOKEN);
   cfg = await global.Transport.config();
@@ -117,6 +139,10 @@ const srv = http.createServer((req, res) => {
 
   const h = await Api.api('/health');
   ok('authenticated call succeeds', h.modelLoaded === true);
+
+  const det = await global.Transport.detect();
+  ok('detect finds Medha', det.found && det.found.length === 1, JSON.stringify(det));
+  ok('detect reports token status', det.found[0].tokenOk === true);
 
   // blocked endpoint
   try { await Api.api('/v1/models'); ok('allowlist enforced in bridge', false, 'it succeeded'); }

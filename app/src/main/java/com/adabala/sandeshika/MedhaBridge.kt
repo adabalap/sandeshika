@@ -97,8 +97,9 @@ class MedhaBridge(
     fun saveSettings(id: String, url: String, newToken: String) {
         scope.launch {
             val cleanUrl = url.trim().trimEnd('/')
-            if (!Regex("^https?://[\\w.\\-]+(:\\d{1,5})?$").matches(cleanUrl)) {
-                resolve(id, 400, err("'$cleanUrl' is not a valid address, e.g. http://127.0.0.1:8001"))
+            val why = badUrl(cleanUrl)
+            if (why != null) {
+                resolve(id, 400, err(why))
                 return@launch
             }
             // Blank means "keep the saved one" so the port can be changed
@@ -135,6 +136,36 @@ class MedhaBridge(
                 put("tokenPreview", mask(useToken))
                 put("modelLoaded", loaded)
             }.toString())
+        }
+    }
+
+    /**
+     * Probes the ports Medha is usually on.
+     *
+     * A correct token paired with the wrong port is the most common setup
+     * failure, and it surfaces as an opaque connection error. Finding the
+     * service removes the guesswork.
+     */
+    @JavascriptInterface
+    fun detect(id: String) {
+        scope.launch {
+            val found = org.json.JSONArray()
+            for (port in intArrayOf(8080, 8001, 8000, 8081, 5001, 9090)) {
+                val base = "http://127.0.0.1:$port"
+                val (code, body) = call("GET", "$base/health", null, null, null)
+                if (code != 200) continue
+                val loaded = runCatching { JSONObject(body).optBoolean("modelLoaded") }.getOrDefault(false)
+                var tokenOk: Boolean? = null
+                if (token.isNotEmpty()) {
+                    val (c2, _) = call("GET", "$base/store?prefix=meta/&limit=1", null, token, null)
+                    tokenOk = c2 !in listOf(401, 403)
+                }
+                found.put(JSONObject().apply {
+                    put("url", base); put("modelLoaded", loaded)
+                    if (tokenOk != null) put("tokenOk", tokenOk)
+                })
+            }
+            resolve(id, 200, JSONObject().put("found", found).toString())
         }
     }
 
@@ -220,6 +251,29 @@ class MedhaBridge(
     }
 
     private fun err(msg: String) = JSONObject().put("error", msg).put("code", "bridge").toString()
+
+    /**
+     * Returns null when the address is usable, otherwise why not.
+     * 127.0.0.0 is the loopback NETWORK, one keystroke from what people mean,
+     * and nothing listens on it — worth naming explicitly.
+     */
+    private fun badUrl(url: String): String? {
+        val m = Regex("^(https?)://([^/:\\s]+)(?::(\\d{1,5}))?/?$").find(url)
+            ?: return "Use the form http://127.0.0.1:8080 — scheme, host and port, with no path."
+        val host = m.groupValues[2]
+        val port = m.groupValues[3]
+        if (host.matches(Regex("[0-9.]+"))) {
+            val parts = host.split(".")
+            if (parts.size != 4 || parts.any { it.toIntOrNull() !in 0..255 }) {
+                return "'$host' is not a valid IP address. Did you mean 127.0.0.1?"
+            }
+            if (host == "127.0.0.0") return "127.0.0.0 is the loopback network, not an address. Use 127.0.0.1."
+            if (parts[0] == "127" && host != "127.0.0.1") return "Loopback is 127.0.0.1, not $host."
+        }
+        if (port.isEmpty()) return "Include the port, e.g. http://127.0.0.1:8080."
+        if (port.toIntOrNull() !in 1..65535) return "Port $port is out of range (1-65535)."
+        return null
+    }
 
     private fun mask(t: String) = when {
         t.isEmpty() -> ""

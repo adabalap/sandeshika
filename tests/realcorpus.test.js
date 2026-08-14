@@ -108,5 +108,47 @@ ok('DLT suffixes normalise', new Set(senders.map((s) => P.senderBank(s))).size =
    JSON.stringify(senders.map((s) => P.senderBank(s))));
 ok('ICICI variants resolve', P.senderBank('JD-ICICIT-S') === 'ICICI', String(P.senderBank('JD-ICICIT-S')));
 
+
+
+// ==========================================================================
+// DATES. A wrong date is invisible: the amount is right, the merchant is
+// right, and the transaction lands in the wrong month. Corpus auditing found
+// 12,306 messages whose written date was ignored in favour of the SMS arrival
+// time, because month-name-first dates were never matched.
+// ==========================================================================
+{
+  const arrived = new Date(2026, 7, 13).getTime();
+  const dates = [
+    ['DD/MM/YY slash',   'Sent Rs.100 From HDFC To Rapido On 10/08/26 Ref 1', '2026-08-10'],
+    ['DD-MM-YY dash',    'Rs.450 debited from a/c XX1234 on 05-08-25 to VPA x@ybl', '2025-08-05'],
+    ['DD-MMM-YY',        'payment of INR 39,710.00 towards ICICI Credit Card on 02-Jul-26', '2026-07-02'],
+    ['DD/MMM/YYYY',      'Rs.500 debited on 03/FEB/2023 card XX1234', '2023-02-03'],
+    ['DDMMMYY squashed', 'A/C X1234 debited by 450.0 on date 05Aug25 trf to SHOP', '2025-08-05'],
+    ['MMM DD, YYYY',     'payment attempt of Rs. 299.00 on Feb 24, 2025 01:11:30 PM failed', '2025-02-24'],
+    ['MMM DD YYYY',      'Rs.500 debited on Aug 06 2024 to VPA x@ybl', '2024-08-06'],
+    ['ISO',              'Rs.500 debited on 2025-08-05 to VPA x@ybl', '2025-08-05'],
+    ['DD/MM/YYYY',       'processed payment of INR 1500.00 to Merchant X on 25/06/2026', '2026-06-25'],
+  ];
+  for (const [name, body, want] of dates) {
+    const got = new Date(P.parseDate(body, arrived)).toISOString().slice(0, 10);
+    ok(`date ${name}`, got === want, `got ${got}, want ${want}`);
+  }
+
+  // day-first, not month-first: 05/08 is 5 August in India, never 8 May
+  ok('day-first convention', new Date(P.parseDate('on 05/08/25', arrived)).getMonth() === 7);
+  // a message with no date must fall back to arrival, not to epoch
+  ok('no date falls back to arrival', P.parseDate('no date at all here', arrived) === arrived);
+  // an impossible date must not silently become something else
+  const weird = P.parseDate('on 45/45/45', arrived);
+  ok('impossible date rejected', weird === arrived, new Date(weird).toISOString());
+
+  // the whole-message path, not just the helper
+  const r = P.parse({ id: 1, date: arrived, address: 'JE-JIOPAY',
+    body: 'Rs.299.00 debited on Feb 24, 2025 for Jio recharge. Ref 998877' });
+  ok('month-first date used end to end', r.ok &&
+     new Date(r.txn.date).toISOString().slice(0, 10) === '2025-02-24',
+     r.ok ? new Date(r.txn.date).toISOString() : r.reason);
+}
+
 console.log(`\n${'-'.repeat(50)}\npassed=${pass}  failed=${fail}`);
 if (failures.length) { console.log('\nFAILURES:'); failures.forEach((f) => console.log('  ' + f)); process.exit(1); }

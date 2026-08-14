@@ -1,22 +1,33 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 48 48">
   <defs>
-    <linearGradient id="bg" x1="3" y1="2" x2="45" y2="46" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#0B3D6B"/><stop offset="0.5" stop-color="#1462A8"/><stop offset="1" stop-color="#1E9BD8"/>
+    <linearGradient id="bg" x1="2" y1="0" x2="46" y2="48" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0A2E52"/><stop offset="0.45" stop-color="#125FA8"/><stop offset="1" stop-color="#1FA6D8"/>
     </linearGradient>
-    <linearGradient id="bar" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#FFE29A"/><stop offset="1" stop-color="#F4A62E"/>
+    <linearGradient id="rupee" x1="0" y1="14" x2="0" y2="34" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#D7ECFA"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFD97A"/><stop offset="1" stop-color="#F2952B"/>
     </linearGradient>
   </defs>
+
   <rect width="48" height="48" rx="12" fill="url(#bg)"/>
-  <path d="M13,10 h22 a5,5 0 0 1 5,5 v14 a5,5 0 0 1 -5,5 h-13 l-8,6.5 v-6.5 h-1 a5,5 0 0 1 -5,-5 v-14 a5,5 0 0 1 5,-5 z" fill="#FFFFFF" opacity="0.96"/>
-  <g stroke="#0B3D6B" stroke-width="1.85" stroke-linecap="round" fill="none">
-    <path d="M17.5,15.5 h9"/>
-    <path d="M17.5,18.6 h9"/>
-    <path d="M17.5,21.7 h4.6 c3,0 4.6,-1.6 4.6,-3.1"/>
-    <path d="M17.5,21.7 L26.1,28.6"/>
+
+  <!-- speech bubble, drawn as an outline so the rupee reads as the subject -->
+  <path d="M10.5,11 h27 a5.5,5.5 0 0 1 5.5,5.5 v15 a5.5,5.5 0 0 1 -5.5,5.5 h-16.5 l-7.5,5.6 v-5.6 h-3 a5.5,5.5 0 0 1 -5.5,-5.5 v-15 a5.5,5.5 0 0 1 5.5,-5.5 z"
+        fill="#0A2E52" fill-opacity="0.32" stroke="#EAF4FC" stroke-width="2.1" stroke-linejoin="round"/>
+
+  <!-- rupee: the subject of the mark -->
+  <g stroke="url(#rupee)" stroke-width="2.5" stroke-linecap="round" fill="none">
+    <path d="M16,17.5 h12"/>
+    <path d="M16,21.7 h12"/>
+    <path d="M16,25.9 h5.9 c4,0 6.1,-2.1 6.1,-4.2"/>
+    <path d="M16,25.9 L26.6,33.5"/>
   </g>
-  <g fill="url(#bar)">
-    <rect x="29.8" y="24.4" width="2.6" height="4.2" rx=".9"/>
-    <rect x="33.6" y="21.4" width="2.6" height="7.2" rx=".9"/>
+
+  <!-- rising bars: the "insight" half of the idea -->
+  <g fill="url(#gold)">
+    <rect x="31.2" y="28.4" width="3" height="5.1" rx="1.1"/>
+    <rect x="35.6" y="24.2" width="3" height="9.3" rx="1.1"/>
   </g>
 </svg>

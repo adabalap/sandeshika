@@ -72,6 +72,15 @@
       <div id="reviewList"></div>
     </div>
 
+    <div class="card" id="qualityCard">
+      <h2>Data quality</h2>
+      <p class="hint">
+        How much of your inbox was understood. Anything unread is listed, never
+        silently dropped.
+      </p>
+      <div id="qualityBody" class="rows"></div>
+    </div>
+
     <div class="card">
       <h2>By category</h2>
       <div id="catChart" class="bars"></div>
@@ -201,6 +210,7 @@
 
       <div class="row-btns">
         <button id="btnSaveToken">Save &amp; connect</button>
+        <button id="btnDetect" class="ghost">Find Medha</button>
         <button id="btnRecheck" class="ghost">Re-check</button>
       </div>
       <button id="btnClearSaved" class="ghost small" hidden>Forget saved settings</button>

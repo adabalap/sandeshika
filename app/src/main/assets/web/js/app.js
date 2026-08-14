@@ -154,8 +154,48 @@
       </div>`).join('') || '<p class="empty">Nothing yet.</p>';
 
     renderSpark(s.byDay, r);
+    renderQuality();
     renderReview();
     renderTxns();
+  }
+
+  /**
+   * Coverage, stated plainly.
+   *
+   * A spending app is only as good as the fraction of the inbox it actually
+   * understood, and that number is normally invisible — which lets a parser
+   * miss a whole message format while the totals still look plausible.
+   */
+  function renderQuality() {
+    const el = $('#qualityBody');
+    if (!txns.length) {
+      el.innerHTML = '<p class="empty">Import your messages to see coverage.</p>';
+      return;
+    }
+    const review = txns.filter((t) => t.needsReview && !t.reviewed).length;
+    const guessed = txns.filter((t) => t.categorySource === 'guess').length;
+    const llm = txns.filter((t) => t.categorySource === 'llm').length;
+    const uncategorised = txns.filter((t) => !t.category || t.category === 'other').length;
+    const noMerchant = txns.filter((t) => !t.merchant).length;
+    const foreign = txns.filter((t) => t.currency !== 'INR').length;
+
+    const row = (label, n, tone) => `
+      <div class="row">
+        <span class="dot" style="background:${tone}"></span>
+        <div class="row-main"><strong>${label}</strong></div>
+        <span class="row-amt">${n}</span>
+      </div>`;
+
+    el.innerHTML = [
+      row('Transactions stored', txns.length, '#1FAE7A'),
+      row('Categorised by rule', txns.length - llm - guessed - uncategorised, '#1FAE7A'),
+      llm ? row('Categorised by the model', llm, '#4C8DF6') : '',
+      guessed ? row('Guessed — confirm these', guessed, '#F4A62E') : '',
+      review ? row('Waiting for review', review, '#F4A62E') : '',
+      uncategorised ? row('Uncategorised', uncategorised, '#A0AAB6') : '',
+      noMerchant ? row('No merchant identified', noMerchant, '#A0AAB6') : '',
+      foreign ? row('Foreign currency, excluded', foreign, '#B569E8') : '',
+    ].filter(Boolean).join('');
   }
 
   function renderSpark(byDay, [a, b]) {
@@ -391,6 +431,14 @@
     if (e && e.status === 503) return 'Medha is running but no model is loaded.';
     if (e && e.status === 502) return m;
     if (/^HTTP \d+$/.test(m)) return `Medha returned ${m}. Check Setup.`;
+    // Raw browser/network failures. "Failed to fetch" is the least useful
+    // string a user can be shown, and it is the one they see most often.
+    if (/failed to fetch|networkerror|load failed/i.test(m)) {
+      return Transport.native
+        ? 'Could not reach Medha. Check it is running and the address in Setup matches its port.'
+        : 'Could not reach the Sandeshika server. If you closed the terminal, start it again.';
+    }
+    if (/not reachable|cannot reach/i.test(m)) return m;
     return m;
   }
 
@@ -686,7 +734,7 @@
       await checkConnection();
       await reload();
     } catch (e) {
-      el.innerHTML = `<span class="err">${esc(e.message)}</span>`;
+      el.innerHTML = `<span class="err">${esc(friendly(e))}</span>`;
     } finally {
       btn.disabled = false;
     }
@@ -790,6 +838,30 @@
     $('#askInput').value = c.textContent;
     ask();
   }));
+
+  $('#btnDetect').addEventListener('click', async () => {
+    const el = $('#connState');
+    el.innerHTML = '<span class="warn">Scanning the usual ports…</span>';
+    try {
+      const r = await Transport.detect();
+      if (!r.found || !r.found.length) {
+        el.innerHTML = '<span class="err">No Medha found on '
+          + esc((r.tried || []).join(', '))
+          + '. Check the port shown in the Medha app, and that it is running.</span>';
+        return;
+      }
+      // Prefer one that already accepts the saved token.
+      const best = r.found.find((f) => f.tokenOk) || r.found[0];
+      $('#medhaUrl').value = best.url;
+      el.innerHTML = `<span class="ok">Found Medha at ${esc(best.url)}`
+        + (best.modelLoaded ? ' · model loaded' : ' · no model loaded')
+        + (best.tokenOk === false ? ' · saved token rejected, paste a new one' : '')
+        + '</span>';
+      if (best.tokenOk) await saveSettings();
+    } catch (e) {
+      el.innerHTML = `<span class="err">${esc(friendly(e))}</span>`;
+    }
+  });
 
   $('#btnSaveToken').addEventListener('click', saveSettings);
   $('#btnClearSaved').addEventListener('click', async () => {
