@@ -566,7 +566,30 @@ function parse(sms) {
   // Secondary key for cross-sender duplicates: one payment often produces a
   // bank SMS, a UPI-app SMS and a merchant SMS, none sharing an account tail.
   // Amount + direction + a 10-minute bucket catches those.
-  txn.softKey = `${direction}:${txn.amount}:${Math.round(txn.date / 600000)}`;
+  // Cross-sender duplicate detection.
+  //
+  // One payment is often reported twice: once by the bank and once by the UPI
+  // app, seconds apart, with no shared reference number. Amount + merchant +
+  // rough time identifies that pair.
+  //
+  // Two subtleties, both learned the hard way:
+  //
+  //  - The MERCHANT must be in the key. Without it, "amount + 10-minute
+  //    bucket" merged two different ₹100 payments made in the same window, and
+  //    a busy day lost most of its transactions.
+  //  - Only the LEADING token of the merchant is used, because the bank writes
+  //    "swiggy" where the wallet writes "Swiggy via Paytm".
+  //  - TWO buckets are emitted, not one. A fixed bucket boundary splits events
+  //    45 seconds apart into different buckets roughly a tenth of the time, so
+  //    the duplicate silently survives. Checking the current and previous
+  //    bucket removes that edge entirely.
+  const mk = merchantKey(txn.merchant).split(' ')[0];
+  const bucket = Math.floor(txn.date / 600000);
+  txn.softKeys = mk
+    ? [`${direction}:${txn.amount}:${bucket}:${mk}`,
+       `${direction}:${txn.amount}:${bucket - 1}:${mk}`]
+    : [`nomerchant:${sms.id}`];
+  txn.softKey = txn.softKeys[0];
   return { ok: true, txn };
 }
 

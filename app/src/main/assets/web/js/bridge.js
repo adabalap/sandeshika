@@ -69,6 +69,7 @@
 
     async config() {
       if (!native) return fetch('/config.json').then((r) => r.json());
+      // getConfig is synchronous on the native side: it only reads prefs.
       return JSON.parse(window.AndroidMedha.getConfig());
     },
 

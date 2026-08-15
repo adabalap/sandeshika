@@ -57,7 +57,6 @@ async function api(path, opts = {}) {
   let r;
   try {
     // Transport picks the native bridge (APK) or the Flask proxy (browser).
-    // Either way the token is attached outside JS.
     r = await Transport.api(path, { ...opts, headers });
   } catch (e) {
     throw new ApiError(e.message || 'Cannot reach Medha.', 0, 0);
@@ -221,9 +220,11 @@ async function ingestPage(messages, known, soft, onWait, drift) {
     // Secondary key: one payment can produce a bank SMS, a UPI-app SMS and a
     // merchant SMS, none sharing an account tail or a reference. Amount +
     // direction inside a 10-minute bucket catches those cross-sender copies.
-    if (soft.has(r.txn.softKey)) { duplicates++; continue; }
+    // Any of the candidate keys matching means we have seen this payment.
+    const keys = r.txn.softKeys || [r.txn.softKey];
+    if (keys.some((k) => soft.has(k))) { duplicates++; continue; }
     known.add(r.txn.fingerprint);
-    soft.add(r.txn.softKey);
+    keys.forEach((k) => soft.add(k));
 
     if (r.txn.kind === 'transfer') {
       r.txn.category = 'transfer';
@@ -263,7 +264,7 @@ async function ingestPage(messages, known, soft, onWait, drift) {
 async function backfill({ onProgress, onWait, shouldStop }) {
   const existing = await loadTransactions();
   const known = new Set(existing.map((t) => t.fingerprint));
-  const soft = new Set(existing.map((t) => t.softKey).filter(Boolean));
+  const soft = new Set(existing.flatMap((t) => t.softKeys || [t.softKey]).filter(Boolean));
   await primeCategoryCache();
 
   const drift = [];
@@ -344,7 +345,7 @@ async function catchUp() {
 
   const existing = await loadTransactions();
   const known = new Set(existing.map((t) => t.fingerprint));
-  const soft = new Set(existing.map((t) => t.softKey).filter(Boolean));
+  const soft = new Set(existing.flatMap((t) => t.softKeys || [t.softKey]).filter(Boolean));
   await primeCategoryCache();
 
   const page = await api('/connectors/sms/messages?limit=100&since=' + since);

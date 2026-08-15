@@ -1,22 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Solid bubble, heavy rupee, one accent bar. An outlined mark turns to mush at
-  launcher sizes; a filled shape with thick strokes survives the downscale.
-  Content stays inside the 66dp adaptive keyline.
+  One bold rupee, nothing else.
+  Earlier marks packed a bubble, a rupee and bars into 48px and turned to mush.
+  A single glyph with heavy strokes is legible at every launcher size, and the
+  rupee already says "money" without help. Content stays inside the 66dp keyline.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
-
-    <path android:pathData="M25,26 h58 a9,9 0 0 1 9,9 v34 a9,9 0 0 1 -9,9 h-38 l-18,12.8 v-12.8 h-2 a9,9 0 0 1 -9,-9 v-34 a9,9 0 0 1 9,-9 z"
-        android:fillColor="#FFFFFFFF" />
-
     <group>
-        <path android:pathData="M37,39.6 h24.8" android:strokeColor="#FF0B3E8C" android:strokeWidth="6.2" android:strokeLineCap="round" />
-        <path android:pathData="M37,49.2 h24.8" android:strokeColor="#FF0B3E8C" android:strokeWidth="6.2" android:strokeLineCap="round" />
-        <path android:pathData="M37,58.8 h11.2 c8.4,0 13.6,-4.8 13.6,-9.6" android:strokeColor="#FF0B3E8C" android:strokeWidth="6.2" android:strokeLineCap="round" />
-        <path android:pathData="M37,58.8 L59.2,74.4" android:strokeColor="#FF0B3E8C" android:strokeWidth="6.2" android:strokeLineCap="round" />
+        <path android:pathData="M33,32 h45" android:strokeColor="#FFFFFFFF" android:strokeWidth="9.9" android:strokeLineCap="round" />
+        <path android:pathData="M33,49 h45" android:strokeColor="#FFFFFFFF" android:strokeWidth="9.9" android:strokeLineCap="round" />
+        <path android:pathData="M33,66 h19 c16.2,0 25.9,-8.1 25.9,-16.9" android:strokeColor="#FFFFFFFF" android:strokeWidth="9.9" android:strokeLineCap="round" />
+        <path android:pathData="M33,66 L71,92" android:strokeColor="#FFFFFFFF" android:strokeWidth="9.9" android:strokeLineCap="round" />
     </group>
-
-    <path android:pathData="M70.4,50.8 h8.8 v23.6 h-8.8 z" android:fillColor="#FFF5A623" />
 </vector>

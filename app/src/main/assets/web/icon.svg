@@ -1,20 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 48 48">
   <defs>
-    <linearGradient id="bg" x1="4" y1="0" x2="44" y2="48" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#1B6FE0"/><stop offset="1" stop-color="#0B3E8C"/>
+    <linearGradient id="bg" x1="0" y1="0" x2="48" y2="48" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#12B886"/><stop offset="1" stop-color="#0A6B5B"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="12" fill="url(#bg)"/>
-  <!-- solid white bubble: at 48px an outline turns to mush, a filled shape does not -->
-  <path d="M9.5,10 h29 a4.5,4.5 0 0 1 4.5,4.5 v17 a4.5,4.5 0 0 1 -4.5,4.5 h-19 l-9,6.4 v-6.4 h-1 a4.5,4.5 0 0 1 -4.5,-4.5 v-17 a4.5,4.5 0 0 1 4.5,-4.5 z"
-        fill="#FFFFFF"/>
-  <!-- rupee, heavy strokes so it survives downscaling -->
-  <g stroke="#0B3E8C" stroke-width="3.1" stroke-linecap="round" fill="none">
-    <path d="M15.5,16.8 h12.4"/>
-    <path d="M15.5,21.6 h12.4"/>
-    <path d="M15.5,26.4 h5.6 c4.2,0 6.8,-2.4 6.8,-4.8"/>
-    <path d="M15.5,26.4 L26.6,34.2"/>
+  <!-- single bold rupee, centred, filling the tile: unmistakable at any size -->
+  <g stroke="#FFFFFF" stroke-width="4.4" stroke-linecap="round" fill="none">
+    <path d="M14,13.5 h20"/>
+    <path d="M14,21 h20"/>
+    <path d="M14,28.5 h8.5 c7.2,0 11.5,-3.6 11.5,-7.5"/>
+    <path d="M14,28.5 L31,40"/>
   </g>
-  <!-- one accent bar, not two: two read as noise at small sizes -->
-  <rect x="32.2" y="22.4" width="4.4" height="11.8" rx="1.6" fill="#F5A623"/>
 </svg>

@@ -711,25 +711,91 @@
     $('#btnClearSaved').hidden = !(cfg.tokenSource === 'saved' || cfg.urlSource === 'saved');
   }
 
+  /**
+   * Names the failing layer instead of leaving us to guess.
+   *
+   * Four things sit between a tap and an answer: the transport (native bridge
+   * or Flask proxy), the Sandeshika server, Medha itself, and the token. A
+   * single "Failed to fetch" is consistent with all four, which is why the same
+   * symptom has been chased through the wrong layer more than once.
+   */
+  async function diagnose() {
+    const out = $('#diagOut');
+    out.hidden = false;
+    const lines = [];
+    const step = async (label, fn) => {
+      try {
+        const r = await fn();
+        lines.push(`PASS  ${label}${r ? '  ' + r : ''}`);
+        return true;
+      } catch (e) {
+        lines.push(`FAIL  ${label}\n        ${e.message}`);
+        return false;
+      } finally {
+        out.textContent = lines.join('\n');
+      }
+    };
+
+    lines.push(`transport   : ${Transport.native ? 'native bridge (APK)' : 'HTTP proxy (browser)'}`);
+    if (Transport.native) {
+      const missing = ['getConfig', 'saveSettings', 'clearSettings', 'request', 'detect']
+        .filter((m) => typeof window.AndroidMedha[m] !== 'function');
+      lines.push(missing.length
+        ? `bridge      : MISSING ${missing.join(', ')} — the APK and its web assets are out of step`
+        : 'bridge      : all methods present');
+    }
+    out.textContent = lines.join('\n');
+
+    let cfg2 = null;
+    await step('read configuration', async () => {
+      cfg2 = await Transport.config();
+      return `address ${cfg2.medhaUrl}, token ${cfg2.tokenConfigured ? cfg2.tokenPreview : 'NOT SET'}`;
+    });
+
+    const reachable = await step('Medha /health', async () => {
+      const h = await api('/health');
+      return `model ${h.modelLoaded ? 'loaded' : 'NOT loaded'}, backend ${h.backend || '?'}`;
+    });
+
+    if (reachable) {
+      await step('token accepted (/store)', async () => {
+        await api('/store?prefix=meta/&limit=1');
+        return 'yes';
+      });
+      await step('SMS connector', async () => {
+        const st = await api('/connectors/sms/status');
+        if (st.supported === false) throw new Error('this Medha build has no SMS connector — install the "full" APK');
+        if (!st.canRead) throw new Error('Medha lacks Android\'s SMS permission — Medha → menu → SMS connector → Grant');
+        return `${st.totalMessages} messages visible`;
+      });
+      await step('read one page of messages', async () => {
+        const p = await api('/connectors/sms/messages?limit=5');
+        if (!p.messages.length) throw new Error('the connector returned no messages at all');
+        return `${p.messages.length} returned, newest ${new Date(p.messages[0].date).toLocaleString()}`;
+      });
+    } else {
+      await step('scan for Medha', async () => {
+        const d = await Transport.detect();
+        if (!d.found || !d.found.length) throw new Error('nothing answered on any common port');
+        return d.found.map((f) => f.url).join(', ');
+      });
+    }
+    out.textContent = lines.join('\n') + '\n\nSend this text if you need help — it contains no personal data.';
+  }
+
   async function saveSettings() {
     const el = $('#connState');
     const btn = $('#btnSaveToken');
     btn.disabled = true;
     el.innerHTML = '<span class="warn">Checking…</span>';
     try {
-      const r = await fetch('/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          medhaUrl: $('#medhaUrl').value.trim(),
-          token: $('#tokenInput').value.trim(),
-        }),
-      });
-      const j = await r.json();
-      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      // Transport picks the native bridge (APK) or the Flask proxy (browser).
+      // Calling fetch('/settings') directly worked in the browser and failed in
+      // the APK, where there is no server to answer it.
+      await Transport.saveSettings($('#medhaUrl').value.trim(), $('#tokenInput').value.trim());
       $('#tokenInput').value = '';
       banner('Connected to Medha');
-      cfg = await fetch('/config.json').then((x) => x.json());
+      cfg = await Transport.config();
       renderSettingsForm();
       await checkConnection();
       await reload();
@@ -743,7 +809,7 @@
   async function checkConnection() {
     const el = $('#connState');
     try {
-      cfg = await fetch('/config.json').then((r) => r.json());
+      cfg = await Transport.config();
       renderSettingsForm();
       if (!cfg.mock && !cfg.tokenConfigured) {
         el.innerHTML = '<span class="warn">No token saved yet — paste one above.</span>';
@@ -863,11 +929,12 @@
     }
   });
 
+  $('#btnDiagnose').addEventListener('click', diagnose);
   $('#btnSaveToken').addEventListener('click', saveSettings);
   $('#btnClearSaved').addEventListener('click', async () => {
     if (!confirm('Forget the saved token and address, and fall back to how the server was started?')) return;
     try {
-      await fetch('/settings', { method: 'DELETE' });
+      await Transport.clearSettings();
       banner('Saved settings cleared');
       await checkConnection();
     } catch (e) { banner(friendly(e), 'error'); }

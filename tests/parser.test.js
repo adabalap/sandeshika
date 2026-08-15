@@ -347,12 +347,22 @@ eq('vpaQuality named dotted', P.vpaQuality('swiggy.stores'), 'named');
     body: 'Rs.450.00 debited from a/c XX1234 on 05-08-25 to VPA swiggy@ybl' });
   const upiApp = P.parse({ id: 2, date: T + 45000, address: 'JM-PAYTM',
     body: 'You paid Rs.450 to Swiggy via Paytm UPI on 05-08-25' });
-  ok('cross-sender dupes share a soft key', bank.txn.softKey === upiApp.txn.softKey,
-     `${bank.txn.softKey} vs ${upiApp.txn.softKey}`);
+  const share = bank.txn.softKeys.some((k) => upiApp.txn.softKeys.includes(k));
+  ok('cross-sender dupes share a soft key', share,
+     `${bank.txn.softKeys} vs ${upiApp.txn.softKeys}`);
 
   const different = P.parse({ id: 3, date: T, address: 'AX-HDFCBK',
     body: 'Rs.451.00 debited from a/c XX1234 on 05-08-25 to VPA swiggy@ybl' });
-  ok('different amount => different soft key', bank.txn.softKey !== different.txn.softKey);
+  ok('different amount => different soft key',
+     !bank.txn.softKeys.some((k) => different.txn.softKeys.includes(k)));
+  // Regression: distinct payees for the same amount in one window must survive.
+  const p1 = P.parse({ id: 9, date: T, address: 'AX-HDFCBK',
+    body: 'Sent Rs.100.00\nFrom HDFC Bank A/C *5261\nTo Ramesh Kumar\nOn 10/08/26\nRef 111' });
+  const p2 = P.parse({ id: 10, date: T + 60000, address: 'AX-HDFCBK',
+    body: 'Sent Rs.100.00\nFrom HDFC Bank A/C *5261\nTo Suresh Patel\nOn 10/08/26\nRef 222' });
+  ok('different payees are not merged',
+     !p1.txn.softKeys.some((k) => p2.txn.softKeys.includes(k)),
+     `${p1.txn.softKeys} vs ${p2.txn.softKeys}`);
 }
 
 // --- 11i. number-format anomalies from the field ---
