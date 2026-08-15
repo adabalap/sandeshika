@@ -63,6 +63,10 @@ jobs:
           grep -q "__medhaResolve" "$KT"
           echo "bridge contract OK"
 
+      - name: Check for missing declarations
+        working-directory: ${{ steps.root.outputs.dir }}
+        run: python3 tools/check_symbols.py app/src/main/java
+
       - name: Check lifecycle overrides
         working-directory: ${{ steps.root.outputs.dir }}
         run: python3 tools/check_overrides.py app/src
