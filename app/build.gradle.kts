@@ -14,8 +14,8 @@ android {
         applicationId = "com.adabala.sandeshika"
         minSdk = 27
         targetSdk = 34
-        versionCode = 11
-        versionName = "1.7.0"
+        versionCode = 13
+        versionName = "1.9.0"
     }
 
     signingConfigs {

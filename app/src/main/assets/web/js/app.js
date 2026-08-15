@@ -9,6 +9,9 @@
  * is exactly the failure a money app cannot ship.
  */
 (() => {
+  /** Bumped with every release; compared against the server to spot a stale cache. */
+  const BUILD = '1.9.0';
+
   const $ = (s) => document.querySelector(s);
   const $$ = (s) => Array.from(document.querySelectorAll(s));
   const { api, ApiError, Store, loadTransactions, backfill, catchUp } = SandeshikaApi;
@@ -20,6 +23,22 @@
 
   // ------------------------------ formatting ------------------------------
   const inr = (n) => '₹' + Math.round(Math.abs(n)).toLocaleString('en-IN');
+
+  /**
+   * Compact Indian notation for headline figures.
+   *
+   * ₹8,25,856 is nine characters and overflowed the KPI card, shrinking the
+   * text until three cards became unreadable. Lakh and crore are how the amount
+   * would be said aloud anyway, and the exact figure stays one tap away in the
+   * drill-down.
+   */
+  const inrShort = (n) => {
+    const v = Math.abs(n);
+    if (v >= 1e7) return '₹' + (v / 1e7).toFixed(v >= 1e8 ? 0 : 2) + ' Cr';
+    if (v >= 1e5) return '₹' + (v / 1e5).toFixed(v >= 1e6 ? 1 : 2) + ' L';
+    if (v >= 1e3) return '₹' + Math.round(v).toLocaleString('en-IN');
+    return '₹' + Math.round(v);
+  };
   const inrExact = (n) =>
     '₹' + Math.abs(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const fmtDate = (ms) =>
@@ -110,15 +129,18 @@
     const s = summarise(txns, r);
     const prev = summarise(txns, period === 'thisMonth' ? range('lastMonth') : r);
 
-    $('#kpiSpent').textContent = inr(s.spent);
-    $('#kpiIn').textContent = inr(s.received);
-    $('#kpiNet').textContent = (s.net >= 0 ? '+' : '−') + inr(s.net);
+    $('#kpiSpent').textContent = inrShort(s.spent);
+    $('#kpiSpent').title = inr(s.spent);
+    $('#kpiIn').textContent = inrShort(s.received);
+    $('#kpiIn').title = inr(s.received);
+    $('#kpiNet').textContent = (s.net >= 0 ? '+' : '−') + inrShort(s.net);
+    $('#kpiNet').title = inr(s.net);
     $('#kpiNet').className = s.net >= 0 ? 'pos' : 'neg';
     $('#kpiSpentSub').textContent = s.refunded
       ? `${s.count} txns · ${inr(s.refunded)} refunded`
       : `${s.count} transactions`;
     $('#kpiInSub').textContent = s.transferred
-      ? `${inr(s.transferred)} moved between accounts`
+      ? `${inrShort(s.transferred)} moved between accounts`
       : (s.received ? 'income in period' : '');
 
     if (period === 'thisMonth' && prev.spent > 0) {
@@ -154,6 +176,7 @@
       </div>`).join('') || '<p class="empty">Nothing yet.</p>';
 
     renderSpark(s.byDay, r);
+    renderDaily();
     renderQuality();
     renderReview();
     renderTxns();
@@ -339,7 +362,17 @@
     $('#progressText').textContent = text;
   }
 
-  async function runImport() {
+  /** Tells the user whether the next tap resumes or starts fresh. */
+  function renderImportHint() {
+    const c = Store.cursor();
+    $('#btnImport').textContent = c ? 'Resume import' : 'Start import';
+    $('#importHint').textContent = c
+      ? `A previous run stopped part-way; this continues from ${new Date(c).toLocaleDateString()}. `
+        + 'Use "Re-scan everything" to walk the whole inbox again.'
+      : 'Reads every message once. Re-running later is safe — duplicates are skipped.';
+  }
+
+  async function runImport(restart = false) {
     stopRequested = false;
     $('#btnImport').disabled = true;
     $('#btnStop').classList.remove('hidden');
@@ -366,6 +399,7 @@
 
     try {
       const res = await backfill({
+        restart,
         shouldStop: () => stopRequested,
         onWait: (msg, secs) => setProgress(0, `Paused — ${msg}. Retrying in ${secs}s`),
         onProgress: (t) => {
@@ -376,6 +410,13 @@
         },
       });
       setProgress(100, res.stopped ? 'Stopped — resume any time' : 'Import complete');
+      // Scanning far fewer messages than exist almost always means a stale
+      // cursor sent the run to the end of history. Say so, rather than
+      // reporting success over an empty result.
+      if (!res.stopped && total && res.scanned < total * 0.5) {
+        banner(`Only ${res.scanned} of ${total} messages were read — a previous run had `
+          + 'already reached the end. Tap "Re-scan everything" to read them all.', 'error');
+      }
       $('#importStats').innerHTML = statsHtml(res);
       renderDrift(res.drift);
       await reload();
@@ -384,6 +425,7 @@
     } finally {
       $('#btnImport').disabled = false;
       $('#btnStop').classList.add('hidden');
+      renderImportHint();
     }
   }
 
@@ -410,7 +452,8 @@
     <div class="stat"><span>${t.scanned}</span>messages read</div>
     <div class="stat"><span>${t.written}</span>transactions</div>
     <div class="stat"><span>${t.duplicates}</span>duplicates skipped</div>
-    <div class="stat"><span>${t.rejected}</span>non-transactions</div>`;
+    <div class="stat"><span>${t.rejected}</span>non-transactions</div>
+    <div class="stat"><span>${t.pages || 0}</span>pages read</div>`;
 
   /**
    * Raw status codes are not an error message. "HTTP 401" tells the user
@@ -571,9 +614,9 @@
       return b.overdue || (d !== null && d < 0);
     });
 
-    $('#kpiDueSoon').textContent = soon.length ? inr(soon.reduce((s, b) => s + (b.amount || 0), 0)) : '—';
+    $('#kpiDueSoon').textContent = soon.length ? inrShort(soon.reduce((s, b) => s + (b.amount || 0), 0)) : '—';
     $('#kpiDueSoonSub').textContent = soon.length ? `${soon.length} bill${soon.length > 1 ? 's' : ''}` : 'nothing due';
-    $('#kpiOverdue').textContent = late.length ? inr(late.reduce((s, b) => s + (b.amount || 0), 0)) : '—';
+    $('#kpiOverdue').textContent = late.length ? inrShort(late.reduce((s, b) => s + (b.amount || 0), 0)) : '—';
     $('#kpiOverdueSub').textContent = late.length ? `${late.length} overdue` : 'all clear';
     $('#kpiOverdue').className = late.length ? 'neg' : '';
 
@@ -658,6 +701,224 @@
     banner(`Exported ${txns.length} transactions and ${bills.length} bills`);
   }
 
+
+  // ======================================================================
+  // Daily view and drill-down
+  //
+  // Every number here is a sum of rows the user can open and read. That is the
+  // point of the drill-down: a total nobody can trace is a total nobody can
+  // trust, and this is the screen where a mis-categorised transaction gets
+  // found and fixed.
+  // ======================================================================
+  /**
+   * Categories = the built-in list plus anything the user added.
+   *
+   * Held in Medha under meta/categories so it survives reinstalls and is shared
+   * by every device pointing at the same service.
+   */
+  let customCats = [];
+  const allCategories = () => SandeshikaParser.CATEGORIES.concat(customCats);
+
+  async function loadCustomCats() {
+    try {
+      const r = await api('/store/meta/categories');
+      customCats = Array.isArray(r) ? r : (r.categories || []);
+    } catch (_) { customCats = []; }
+    renderCustomCats();
+  }
+
+  async function saveCustomCats() {
+    await api('/store/meta/categories', {
+      method: 'PUT', body: JSON.stringify({ categories: customCats }),
+    });
+    renderCustomCats();
+  }
+
+  function renderCustomCats() {
+    const el = $('#customCatList');
+    if (!el) return;
+    el.innerHTML = customCats.length
+      ? customCats.map((c) => `
+        <div class="row" data-cat="${esc(c)}">
+          <div class="row-main"><strong>${esc(c)}</strong></div>
+          <button class="mini no" data-delcat="1">Remove</button>
+        </div>`).join('')
+      : '<p class="empty">Only the built-in categories so far.</p>';
+  }
+
+  let dPeriod = 'thisMonth';
+  let openDay = null;
+  let openTxn = null;
+
+  function dayKey(ms) {
+    const d = new Date(ms);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
+  function dailyRange() {
+    const now = new Date();
+    switch (dPeriod) {
+      case 'last30': return [Date.now() - 30 * 864e5, Date.now()];
+      case 'lastMonth': {
+        const s = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        return [s.getTime(), new Date(now.getFullYear(), now.getMonth(), 1).getTime() - 1];
+      }
+      case 'all': return [0, Date.now()];
+      default: return [new Date(now.getFullYear(), now.getMonth(), 1).getTime(), Date.now()];
+    }
+  }
+
+  function renderDaily() {
+    const [a, b] = dailyRange();
+    const rows = txns.filter((t) => t.date >= a && t.date <= b && counted(t));
+    const byDay = {};
+    for (const t of rows) {
+      const k = dayKey(t.date);
+      if (!byDay[k]) byDay[k] = { spend: 0, income: 0, count: 0, review: 0 };
+      const d = byDay[k];
+      d.count++;
+      if (isSpend(t)) d.spend += t.amount;
+      if (isRefund(t)) d.spend -= t.amount;
+      if (isIncome(t)) d.income += t.amount;
+      if (t.needsReview && !t.reviewed) d.review++;
+    }
+    const days = Object.entries(byDay).sort((x, y) => (x[0] < y[0] ? 1 : -1));
+    const total = days.reduce((s, [, d]) => s + Math.max(0, d.spend), 0);
+    // Averaged over days that actually had spending, not calendar days: a
+    // month-to-date average divided by 31 on the 3rd is a misleading number.
+    const active = days.filter(([, d]) => d.spend > 0).length;
+
+    $('#dTotal').textContent = inrShort(total);
+    $('#dTotal').title = inr(total);
+    $('#dTotalSub').textContent = `${rows.length} transactions over ${days.length} days`;
+    $('#dAvg').textContent = active ? inrShort(total / active) : '—';
+    $('#dAvgSub').textContent = active ? `across ${active} days with spending` : '';
+
+    const max = Math.max(1, ...days.map(([, d]) => d.spend));
+    $('#dayList').innerHTML = days.map(([k, d]) => {
+      const dt = new Date(k + 'T00:00:00');
+      return `
+      <div class="row day-row" data-day="${k}">
+        <div class="row-main">
+          <strong>${dt.toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short' })}</strong>
+          <span class="row-sub">${d.count} txn${d.count > 1 ? 's' : ''}${
+            d.income ? ' · +' + inr(d.income) : ''}${
+            d.review ? ' · <em class="flag">' + d.review + ' to review</em>' : ''}</span>
+          <div class="bar-track" style="margin-top:5px">
+            <div class="bar-fill" style="width:${(Math.max(0, d.spend) / max) * 100}%;background:#1FAE7A"></div>
+          </div>
+        </div>
+        <span class="row-amt debit">${inr(Math.max(0, d.spend))}</span>
+      </div>`;
+    }).join('') || '<p class="empty">No transactions in this period.</p>';
+  }
+
+  function showView(name) {
+    $$('.view').forEach((v) => v.classList.add('hidden'));
+    $('#view-' + name).classList.remove('hidden');
+  }
+
+  function renderDay(k) {
+    openDay = k;
+    const rows = txns.filter((t) => dayKey(t.date) === k).sort((x, y) => y.date - x.date);
+    const spend = rows.filter(isSpend).reduce((s, t) => s + t.amount, 0);
+    const dt = new Date(k + 'T00:00:00');
+    $('#dayTitle').textContent = dt.toLocaleDateString('en-IN',
+      { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
+    $('#daySummary').textContent =
+      `${rows.length} message${rows.length > 1 ? 's' : ''} · ${inr(spend)} spent. `
+      + 'Tap any row to see the original SMS and set its category.';
+    $('#dayTxns').innerHTML = rows.map((t) => `
+      <div class="row txn-row" data-fp="${esc(t.fingerprint)}">
+        <span class="dot" style="background:${CAT_COLOR[t.category] || '#A0AAB6'}"></span>
+        <div class="row-main">
+          <strong>${esc(t.merchant || 'Unknown')}</strong>
+          <span class="row-sub">${t.category || 'other'} · ${t.kind}${
+            t.categorySource === 'user' ? ' · <em class="flag ok2">you set this</em>' : ''}${
+            t.needsReview && !t.reviewed ? ' · <em class="flag">unverified</em>' : ''}</span>
+        </div>
+        <span class="row-amt ${t.direction}">${t.direction === 'debit' ? '−' : '+'}${inrExact(t.amount)}</span>
+      </div>`).join('') || '<p class="empty">Nothing on this day.</p>';
+    showView('day');
+  }
+
+  function renderTxn(fp) {
+    const t = txns.find((x) => x.fingerprint === fp);
+    if (!t) return;
+    openTxn = t;
+    $('#txnTitle').textContent = `${inrExact(t.amount)} · ${t.merchant || 'Unknown'}`;
+    const fact = (k, v) => `<div class="row"><div class="row-main"><span class="row-sub">${k}</span>
+      <strong>${esc(v)}</strong></div></div>`;
+    $('#txnFacts').innerHTML = [
+      fact('When', new Date(t.date).toLocaleString('en-IN')),
+      fact('Kind', t.kind + (t.kind === 'transfer' ? ' — excluded from spending' : '')),
+      fact('Channel', t.channel),
+      t.bank ? fact('Bank', t.bank) : '',
+      t.account ? fact('Account', '••' + t.account) : '',
+      t.ref ? fact('Reference', t.ref) : '',
+      fact('Category source', t.categorySource || 'unset'),
+      fact('Confidence', Math.round((t.confidence || 0) * 100) + '%'),
+    ].filter(Boolean).join('');
+
+    $('#txnCatHint').textContent = t.merchant
+      ? `Choosing a category teaches Sandeshika about "${t.merchant}".`
+      : 'No merchant was read from this message, so only this transaction can be changed.';
+    $('#catScope').disabled = !t.merchant;
+    if (!t.merchant) $('#catScope').value = 'one';
+
+    $('#catChips').innerHTML = allCategories().map((c) => `
+      <button class="chip cat ${c === t.category ? 'sel' : ''}" data-cat="${c}">${c}</button>`).join('');
+    $('#txnSaveState').innerHTML = '';
+    $('#txnRaw').textContent = t.raw || '(not stored)';
+    showView('txn');
+  }
+
+  async function setCategory(cat) {
+    const t = openTxn;
+    if (!t) return;
+    const el = $('#txnSaveState');
+    el.innerHTML = '<span class="warn">Saving…</span>';
+    try {
+      if ($('#catScope').value === 'one' || !t.merchant) {
+        // Same kind rule as the bulk path, so a one-off correction and a
+        // merchant-wide one can never disagree about whether it is spending.
+        const next = { ...t, category: cat, categorySource: 'user',
+                       kind: SandeshikaApi.kindFor(cat, t),
+                       needsReview: false, reviewed: true };
+        await api('/store/' + SandeshikaApi.Keys.txn(t.fingerprint),
+                  { method: 'PUT', body: JSON.stringify(next) });
+        el.innerHTML = '<span class="ok">Saved for this transaction.</span>';
+      } else {
+        const r = await SandeshikaApi.correctCategory(t.merchant, cat);
+        el.innerHTML = `<span class="ok">Saved. ${r.updated} past transaction`
+          + `${r.updated === 1 ? '' : 's'} from "${esc(t.merchant)}" updated, and future `
+          + 'ones will use it too.</span>';
+      }
+      await reload();
+      renderTxn(t.fingerprint);
+      if (openDay) renderDay(openDay);
+      showView('txn');
+    } catch (e) {
+      el.innerHTML = `<span class="err">${esc(friendly(e))}</span>`;
+    }
+  }
+
+  async function renderLearned() {
+    try {
+      const rules = await SandeshikaApi.learnedRules();
+      $('#learnedList').innerHTML = rules.length ? rules.map((r) => `
+        <div class="row" data-mk="${esc(r.merchantKey)}">
+          <span class="dot" style="background:${CAT_COLOR[r.category] || '#A0AAB6'}"></span>
+          <div class="row-main">
+            <strong>${esc(r.merchant || r.merchantKey)}</strong>
+            <span class="row-sub">${esc(r.category)}${r.at ? ' · ' + fmtDate(r.at) : ''}</span>
+          </div>
+          <button class="mini no" data-forget="1">Forget</button>
+        </div>`).join('')
+        : '<p class="empty">Nothing yet. Correct a category on any transaction and it appears here.</p>';
+    } catch (e) { /* Setup still usable without it */ }
+  }
+
   // ------------------------------ boot ------------------------------
   async function reload() {
     try {
@@ -666,6 +927,8 @@
       $('#filterCat').innerHTML = '<option value="">All categories</option>' +
         cats.map((c) => `<option value="${c}">${c}</option>`).join('');
       render();
+      renderLearned();
+      loadCustomCats();
       $('#subtitle').textContent = txns.length
         ? `${txns.length} transactions · all on this device`
         : 'Spending, bills and highlights from your messages';
@@ -736,6 +999,7 @@
       }
     };
 
+    lines.push(`page build  : ${BUILD}`);
     lines.push(`transport   : ${Transport.native ? 'native bridge (APK)' : 'HTTP proxy (browser)'}`);
     if (Transport.native) {
       const missing = ['getConfig', 'saveSettings', 'clearSettings', 'request', 'detect']
@@ -845,7 +1109,18 @@
             + 'Edit permissions → tick "Read SMS".</span>'
           : `<br><span class="warn">${esc(friendly(e))}</span>`;
       }
-      el.innerHTML = `<span class="ok">Connected to ${esc(cfg.medhaUrl)} · model loaded</span>${sms}`;
+      // Version check. A service worker serving stale JS is invisible from the
+      // inside, and cost days of debugging behaviour the device was not
+      // running. Comparing the page's build against the server's makes it loud.
+      let ver = '';
+      if (cfg.version && cfg.version !== BUILD) {
+        ver = `<br><span class="err">This page is build ${BUILD} but the server is `
+            + `${esc(cfg.version)} — an old copy is cached. Pull down to refresh, or `
+            + 'reinstall the app.</span>';
+      } else if (cfg.version) {
+        ver = `<br><span class="row-sub">build ${esc(cfg.version)}</span>`;
+      }
+      el.innerHTML = `<span class="ok">Connected to ${esc(cfg.medhaUrl)} · model loaded</span>${sms}${ver}`;
       if (!cfg.installable) {
         banner('Open via localhost or HTTPS to install as an app', 'info');
       }
@@ -857,14 +1132,47 @@
   }
 
   // ------------------------------ events ------------------------------
-  $$('.tab').forEach((t) => t.addEventListener('click', () => {
+  function activate(view) {
+    $$('.tab').forEach((x) => x.classList.remove('active'));
+    const tab = document.querySelector(`.tab[data-view="${view}"]`);
+    if (tab) tab.classList.add('active');
+    else $('#btnMenu').classList.add('active');
+    $$('.view').forEach((v) => v.classList.add('hidden'));
+    $('#view-' + view).classList.remove('hidden');
+    if ((view === 'inbox' || view === 'bills') && !inbox.length) loadInbox();
+  }
+
+  $('#btnMenu').addEventListener('click', () => $('#menuSheet').classList.remove('hidden'));
+  $('#btnMenuClose').addEventListener('click', () => $('#menuSheet').classList.add('hidden'));
+  $('#menuSheet').addEventListener('click', (e) => {
+    if (e.target.id === 'menuSheet') $('#menuSheet').classList.add('hidden');
+    const item = e.target.closest('.sheet-item[data-view]');
+    if (item) { $('#menuSheet').classList.add('hidden'); activate(item.dataset.view); }
+  });
+
+  $('#btnAddCat').addEventListener('click', async () => {
+    const v = $('#newCat').value.trim().toLowerCase();
+    if (!/^[a-z][a-z0-9 &-]{1,23}$/.test(v)) return banner('Use 2-24 letters, digits, spaces or &-', 'error');
+    if (allCategories().includes(v)) return banner('That category already exists', 'error');
+    customCats.push(v);
+    try { await saveCustomCats(); $('#newCat').value = ''; banner(`Added "${v}"`); }
+    catch (e) { customCats.pop(); banner(friendly(e), 'error'); }
+  });
+  $('#customCatList').addEventListener('click', async (e) => {
+    const b = e.target.closest('button[data-delcat]');
+    if (!b) return;
+    const c = b.closest('.row').dataset.cat;
+    customCats = customCats.filter((x) => x !== c);
+    try { await saveCustomCats(); banner(`Removed "${c}"`); }
+    catch (err) { banner(friendly(err), 'error'); }
+  });
+
+  $$('.tab[data-view]').forEach((t) => t.addEventListener('click', () => {
     $$('.tab').forEach((x) => x.classList.remove('active'));
     t.classList.add('active');
-    $$('.view').forEach((v) => v.classList.add('hidden'));
-    $('#view-' + t.dataset.view).classList.remove('hidden');
     // Lazily: reading 400 messages on boot would slow the first paint for
     // someone who only wants the spending summary.
-    if ((t.dataset.view === 'inbox' || t.dataset.view === 'bills') && !inbox.length) loadInbox();
+    activate(t.dataset.view);
   }));
 
   $$('.period .chip').forEach((c) => c.addEventListener('click', () => {
@@ -898,6 +1206,36 @@
   // export
   $('#btnExportCsv').addEventListener('click', exportCsv);
   $('#btnExportJson').addEventListener('click', exportJson);
+
+  // daily + drill-down
+  $$('#dailyPeriod .chip').forEach((c) => c.addEventListener('click', () => {
+    $$('#dailyPeriod .chip').forEach((x) => x.classList.remove('sel'));
+    c.classList.add('sel'); dPeriod = c.dataset.dperiod; renderDaily();
+  }));
+  $('#dayList').addEventListener('click', (e) => {
+    const row = e.target.closest('.day-row');
+    if (row) renderDay(row.dataset.day);
+  });
+  $('#dayTxns').addEventListener('click', (e) => {
+    const row = e.target.closest('.txn-row');
+    if (row) renderTxn(row.dataset.fp);
+  });
+  $('#catChips').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-cat]');
+    if (b) setCategory(b.dataset.cat);
+  });
+  $('#btnBackDaily').addEventListener('click', () => { renderDaily(); showView('daily'); });
+  $('#btnBackDay').addEventListener('click', () => {
+    if (openDay) { renderDay(openDay); } else { renderDaily(); showView('daily'); }
+  });
+  $('#learnedList').addEventListener('click', async (e) => {
+    const b = e.target.closest('button[data-forget]');
+    if (!b) return;
+    const mk = b.closest('.row').dataset.mk;
+    if (!confirm(`Forget the category you set for "${mk}"? Past transactions keep their current label.`)) return;
+    try { await SandeshikaApi.forgetRule(mk); banner('Forgotten'); renderLearned(); }
+    catch (err) { banner(friendly(err), 'error'); }
+  });
 
   $('#btnAsk').addEventListener('click', ask);
   $$('.chip.q').forEach((c) => c.addEventListener('click', () => {
@@ -952,7 +1290,12 @@
     catch (_) { banner('Could not copy', 'error'); }
   });
 
-  $('#btnImport').addEventListener('click', runImport);
+  $('#btnImport').addEventListener('click', () => runImport(false));
+  $('#btnRestart').addEventListener('click', () => {
+    if (confirm('Read every message again from the beginning? Existing transactions are kept and duplicates skipped.')) {
+      runImport(true);
+    }
+  });
   $('#btnStop').addEventListener('click', () => { stopRequested = true; });
 
   $('#btnRefresh').addEventListener('click', async () => {
@@ -1001,14 +1344,13 @@
     } catch (e) { banner(friendly(e), 'error'); }
   });
 
+  renderImportHint();
+
   (async () => {
     const connected = await checkConnection();
     await reload();
     if (!connected || !txns.length) {
-      $$('.tab').forEach((x) => x.classList.remove('active'));
-      $$('.view').forEach((v) => v.classList.add('hidden'));
-      document.querySelector('[data-view="setup"]').classList.add('active');
-      $('#view-setup').classList.remove('hidden');
+      activate('setup');
     }
   })();
 })();

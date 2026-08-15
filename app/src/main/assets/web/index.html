@@ -28,12 +28,24 @@
 
 <nav class="tabs" role="tablist">
   <button class="tab active" data-view="overview" role="tab">Overview</button>
+  <button class="tab" data-view="daily" role="tab">Daily</button>
   <button class="tab" data-view="inbox" role="tab">Inbox</button>
-  <button class="tab" data-view="bills" role="tab">Bills</button>
-  <button class="tab" data-view="transactions" role="tab">Spends</button>
-  <button class="tab" data-view="ask" role="tab">Ask</button>
-  <button class="tab" data-view="setup" role="tab">Setup</button>
+  <button class="tab menu-btn" id="btnMenu" aria-label="More" aria-haspopup="true">&#9776; More</button>
 </nav>
+
+<!--
+  Seven tabs did not fit and scrolled horizontally, so half of them were
+  invisible. The three used daily stay on the bar; the rest move behind a menu.
+-->
+<div id="menuSheet" class="sheet hidden" role="menu">
+  <div class="sheet-panel">
+    <button class="sheet-item" data-view="bills" role="menuitem">Bills &amp; due dates</button>
+    <button class="sheet-item" data-view="transactions" role="menuitem">All transactions</button>
+    <button class="sheet-item" data-view="ask" role="menuitem">Ask a question</button>
+    <button class="sheet-item" data-view="setup" role="menuitem">Setup &amp; learning</button>
+    <button class="sheet-item close" id="btnMenuClose" role="menuitem">Close</button>
+  </div>
+</div>
 
 <main>
   <!-- banner -->
@@ -105,6 +117,68 @@
     </div>
     <div id="txnList" class="rows"></div>
     <button id="loadMore" class="ghost hidden">Show more</button>
+  </section>
+
+  <!-- ============================= DAILY ============================= -->
+  <section id="view-daily" class="view hidden">
+    <div class="period" id="dailyPeriod">
+      <button class="chip sel" data-dperiod="thisMonth">This month</button>
+      <button class="chip" data-dperiod="last30">Last 30 days</button>
+      <button class="chip" data-dperiod="lastMonth">Last month</button>
+      <button class="chip" data-dperiod="all">All</button>
+    </div>
+
+    <div class="cards">
+      <div class="card kpi out">
+        <span class="k">Total</span><strong id="dTotal">—</strong>
+        <span class="sub" id="dTotalSub"></span>
+      </div>
+      <div class="card kpi net">
+        <span class="k">Daily average</span><strong id="dAvg">—</strong>
+        <span class="sub" id="dAvgSub"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Day by day</h2>
+      <p class="hint">
+        Tap a day to see the messages behind the number. Every figure here is a
+        sum of the transactions listed underneath it — nothing is estimated.
+      </p>
+      <div id="dayList" class="rows"></div>
+    </div>
+  </section>
+
+  <!-- day drill-down -->
+  <section id="view-day" class="view hidden">
+    <button id="btnBackDaily" class="ghost small">&#8592; Back to days</button>
+    <div class="card">
+      <h2 id="dayTitle">Day</h2>
+      <p class="hint" id="daySummary"></p>
+      <div id="dayTxns" class="rows"></div>
+    </div>
+  </section>
+
+  <!-- transaction detail -->
+  <section id="view-txn" class="view hidden">
+    <button id="btnBackDay" class="ghost small">&#8592; Back</button>
+    <div class="card">
+      <h2 id="txnTitle">Transaction</h2>
+      <div id="txnFacts" class="rows"></div>
+      <h2 style="margin-top:16px">Category</h2>
+      <p class="hint" id="txnCatHint"></p>
+      <div class="suggest" id="catChips"></div>
+      <label class="fld" style="margin-top:6px">
+        <span>Apply to</span>
+        <select id="catScope">
+          <option value="merchant">Every transaction from this merchant</option>
+          <option value="one">Only this transaction</option>
+        </select>
+      </label>
+      <div id="txnSaveState" class="state"></div>
+      <h2 style="margin-top:16px">Original message</h2>
+      <pre id="txnRaw"></pre>
+    </div>
   </section>
 
   <!-- ============================= INBOX ============================= -->
@@ -232,8 +306,10 @@
       </div>
       <div class="row-btns">
         <button id="btnImport">Start import</button>
+        <button id="btnRestart" class="ghost">Re-scan everything</button>
         <button id="btnStop" class="ghost hidden">Stop</button>
       </div>
+      <p class="hint tight" id="importHint"></p>
       <div id="importStats" class="stats"></div>
       <div id="driftCard" class="drift" hidden>
         <strong>Unrecognised messages from your bank</strong>
@@ -255,6 +331,25 @@
         stored, inside Medha, on this device. The API token is held by the
         Sandeshika server process, never by this browser. No cloud, no account.
       </p>
+      <h2 style="margin-top:18px">What Sandeshika has learned</h2>
+      <p class="hint">
+        Categories you corrected. These override every built-in rule and the
+        model, and are applied to past transactions as well as new ones.
+      </p>
+      <div id="learnedList" class="rows"></div>
+
+      <h2 style="margin-top:18px">Your categories</h2>
+      <p class="hint">
+        Add categories that fit how you actually spend. They appear alongside
+        the built-in ones everywhere a category can be chosen.
+      </p>
+      <div id="customCatList" class="rows"></div>
+      <label class="fld">
+        <span>New category</span>
+        <input id="newCat" type="text" placeholder="e.g. school fees" maxlength="24" />
+      </label>
+      <button id="btnAddCat" class="ghost small">Add category</button>
+
       <h2 style="margin-top:18px">Export</h2>
       <p class="hint">
         Your data, in open formats, whenever you want it. Nothing here is

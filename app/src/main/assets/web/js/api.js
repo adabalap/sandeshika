@@ -106,6 +106,17 @@ const Keys = {
   meta: (k) => `meta/${k}`,
 };
 
+/**
+ * Precedence for a category decision.
+ *
+ *   user  >  rule  >  cached model answer  >  fresh model answer  >  other
+ *
+ * A correction the user made outranks everything and is never overwritten by a
+ * later rule change or model answer. That is the whole point: if they told us
+ * once, asking again is a bug.
+ */
+const SOURCE_RANK = { user: 4, rule: 3, llm: 2, guess: 1, fallback: 0, unresolved: 0 };
+
 async function putMany(items) {
   if (!items.length) return 0;
   const out = await api('/store/bulk', {
@@ -159,10 +170,19 @@ Categories: ${SandeshikaParser.CATEGORIES.join(', ')}
 Answer with one word from the list and nothing else.`;
 
 async function resolveCategory(merchant, direction, onWait) {
+  const mk = SandeshikaParser.merchantKey(merchant);
+
+  // A user correction is checked FIRST, before the built-in rule table.
+  // Checking the rules first meant a correction on any merchant the table
+  // already knew ("Rapido" -> transport) was silently ignored, and the user was
+  // asked to fix the same thing again. If they told us once, that is the answer.
+  if (mk && catCache.has(mk) && catCache.get(mk).source === 'user') {
+    return catCache.get(mk);
+  }
+
   const rule = SandeshikaParser.categorise(merchant, direction);
   if (rule) return rule;
 
-  const mk = SandeshikaParser.merchantKey(merchant);
   if (!mk) return { category: 'other', source: 'rule' };
   if (catCache.has(mk)) return catCache.get(mk);
 
@@ -261,16 +281,33 @@ async function ingestPage(messages, known, soft, onWait, drift) {
  * Cursor pagination, not offsets. New messages arriving mid-scan shift every
  * offset and cause duplicates or gaps; `before` is stable regardless.
  */
-async function backfill({ onProgress, onWait, shouldStop }) {
+/**
+ * @param {object} opts
+ * @param {boolean} [opts.restart] ignore any saved cursor and walk the whole
+ *   inbox again. Existing transactions are still deduplicated, so a restart is
+ *   cheap and never creates copies.
+ */
+async function backfill({ onProgress, onWait, shouldStop, restart } = {}) {
   const existing = await loadTransactions();
   const known = new Set(existing.map((t) => t.fingerprint));
   const soft = new Set(existing.flatMap((t) => t.softKeys || [t.softKey]).filter(Boolean));
   await primeCategoryCache();
 
   const drift = [];
-  const totals = { parsed: 0, rejected: 0, duplicates: 0, written: 0, scanned: 0, drift };
-  let before = Store.cursor();
-  let high = Store.watermark();
+  const totals = {
+    parsed: 0, rejected: 0, duplicates: 0, written: 0, scanned: 0,
+    pages: 0, resumedFrom: null, drift,
+  };
+
+  // A cursor left by an earlier run means "carry on from here". That is right
+  // for a run that was interrupted, and badly wrong as a silent default: once a
+  // previous pass reached the oldest message, every later "Start import"
+  // resumed at the end of history, scanned a handful of messages, and reported
+  // success. The caller now decides, and the cursor is reported either way.
+  if (restart) Store.reset();
+  let before = restart ? null : Store.cursor();
+  let high = restart ? 0 : Store.watermark();
+  totals.resumedFrom = before;
 
   /*
    * Timestamp cursors are stable against inserts, but they are NOT unique:
@@ -294,6 +331,7 @@ async function backfill({ onProgress, onWait, shouldStop }) {
     const page = await api('/connectors/sms/messages?' + q);
     if (!page.messages.length) break;
 
+    totals.pages++;
     high = Math.max(high, ...page.messages.map((m) => m.date));
 
     const fresh = page.messages.filter((m) => !seenIds.has(m.id));
@@ -331,8 +369,11 @@ async function backfill({ onProgress, onWait, shouldStop }) {
     if (page.messages.length < 50 && !fresh.length) break;
   }
 
+  // History is exhausted. Clearing the cursor means the next run starts from
+  // the top rather than resuming at the end of time.
+  Store.setCursor(0);
   Store.setWatermark(high);
-  return { ...totals, stopped: false };
+  return { ...totals, stopped: false, complete: true };
 }
 
 /**
@@ -356,7 +397,80 @@ async function catchUp() {
   return { ...r, scanned: page.messages.length };
 }
 
+/**
+ * Records a correction and applies it backwards as well as forwards.
+ *
+ * Forwards only would be half a feature: the inbox already holds months of
+ * transactions filed under the wrong category, and re-importing does not fix
+ * them because the parse is cached. So every stored transaction from the same
+ * merchant is relabelled in one bulk write.
+ *
+ * Returns how many past rows were changed, so the UI can say so rather than
+ * leaving the user to wonder whether it took.
+ */
+/** The kind implied by a category, given the direction of the money. */
+function kindFor(category, txn) {
+  if (category === 'transfer' || category === 'investment') return 'transfer';
+  if (txn.direction === 'credit') return txn.kind === 'refund' ? 'refund' : 'income';
+  return 'expense';
+}
+
+async function correctCategory(merchant, category, opts = {}) {
+  const mk = SandeshikaParser.merchantKey(merchant);
+  if (!mk) throw new ApiError('No merchant to learn from on this transaction.', 0, 0);
+  // Custom categories are legitimate, so validate shape rather than membership:
+  // a closed list would reject the very categories the user just created.
+  if (!/^[a-z][a-z0-9 &-]{1,23}$/i.test(category)) {
+    throw new ApiError(`'${category}' is not a usable category name.`, 0, 0);
+  }
+
+  const rule = { category, source: 'user', merchant, at: Date.now() };
+  catCache.set(mk, rule);
+  await api(`/store/${Keys.cat(mk)}`, { method: 'PUT', body: JSON.stringify(rule) });
+
+  if (opts.thisOnly) return { merchantKey: mk, updated: 0 };
+
+  const all = await loadTransactions();
+  const touched = all.filter((t) => SandeshikaParser.merchantKey(t.merchant) === mk
+    && (t.category !== category || t.categorySource !== 'user'));
+  if (!touched.length) return { merchantKey: mk, updated: 0 };
+
+  await putMany(touched.map((t) => {
+    // `kind` decides whether the amount counts as spending, so it must always
+    // follow the category. Updating it only for unreviewed rows left an already
+    // confirmed transaction labelled "transfer" while still being summed as an
+    // expense — the totals and the label disagreeing is the worst outcome here.
+    const next = {
+      ...t,
+      category,
+      categorySource: 'user',
+      kind: kindFor(category, t),
+      needsReview: false,
+      reviewed: true,
+    };
+    return { key: Keys.txn(t.fingerprint), value: JSON.stringify(next) };
+  }));
+  return { merchantKey: mk, updated: touched.length };
+}
+
+/** Everything the app has been taught, for a screen that can show and undo it. */
+async function learnedRules() {
+  const rows = await listPrefix('cat/', 5000);
+  return rows.map((r) => {
+    let v = {};
+    try { v = JSON.parse(r.value); } catch (_) {}
+    return { merchantKey: r.key.replace(/^cat\//, ''), ...v };
+  }).filter((r) => r.source === 'user').sort((a, b) => (b.at || 0) - (a.at || 0));
+}
+
+/** Forgets one correction. Past transactions keep their current label. */
+async function forgetRule(merchantKey) {
+  catCache.delete(merchantKey);
+  await api(`/store/${Keys.cat(merchantKey)}`, { method: 'DELETE' });
+}
+
 window.SandeshikaApi = {
+  correctCategory, learnedRules, forgetRule, kindFor, SOURCE_RANK,
   MEDHA, Store, api, batchCall, ApiError,
   loadTransactions, listPrefix, putMany, Keys,
   resolveCategory, primeCategoryCache, catCache,

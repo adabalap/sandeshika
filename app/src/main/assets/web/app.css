@@ -169,3 +169,31 @@ code{background:var(--bg);padding:1px 5px;border-radius:4px;font-size:12px}
 .hint.tight{margin:6px 0 0;font-size:11px}
 
 button.small{font-size:12.5px;padding:8px 12px;margin-top:8px}
+
+/* daily drill-down */
+.day-row, .txn-row { cursor: pointer; }
+.day-row:active, .txn-row:active { background: var(--bg); }
+.chip.cat { text-transform: capitalize; }
+.chip.cat.sel { background: var(--green); color: #fff; border-color: var(--green); }
+.flag.ok2 { background:#E3F2EA; color:var(--green); }
+#txnFacts .row { padding: 7px 0; }
+#txnFacts .row-sub { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; }
+
+/* KPI cards must survive lakh-scale figures */
+.kpi strong { font-size: clamp(15px, 5.2vw, 21px); line-height: 1.15;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kpi .sub { font-size: 10px; line-height: 1.3; }
+.cards { gap: 8px; }
+
+/* bottom sheet menu */
+.tab.menu-btn { flex: 0 0 auto; padding-left: 12px; padding-right: 12px; }
+.sheet { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 40;
+  display: flex; align-items: flex-end; }
+.sheet-panel { background: var(--card); width: 100%; border-radius: 20px 20px 0 0;
+  padding: 10px 0 calc(10px + env(safe-area-inset-bottom)); }
+.sheet-item { display: block; width: 100%; text-align: left; background: none;
+  color: var(--ink); border: 0; padding: 15px 22px; font-size: 15px; font-weight: 600;
+  margin: 0; border-radius: 0; }
+.sheet-item:active { background: var(--bg); }
+.sheet-item.close { color: var(--muted); font-weight: 500;
+  border-top: 1px solid var(--line); }
