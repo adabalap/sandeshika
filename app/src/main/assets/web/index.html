@@ -53,6 +53,40 @@
 
   <!-- ============================ OVERVIEW ============================ -->
   <section id="view-overview" class="view">
+    <!-- At-a-glance dashboard: what did I spend, what do I owe, what needs me. -->
+    <div class="cards">
+      <div class="card kpi out">
+        <span class="k">Today</span><strong id="dashToday">—</strong>
+        <span class="sub" id="dashTodaySub"></span>
+      </div>
+      <div class="card kpi out">
+        <span class="k">This month</span><strong id="dashMonth">—</strong>
+        <span class="sub" id="dashMonthSub"></span>
+      </div>
+    </div>
+
+    <div class="cards">
+      <div class="card kpi net">
+        <span class="k">Due in 7 days</span><strong id="dashDue">—</strong>
+        <span class="sub" id="dashDueSub"></span>
+      </div>
+      <div class="card kpi">
+        <span class="k">Overdue</span><strong id="dashOverdue">—</strong>
+        <span class="sub" id="dashOverdueSub"></span>
+      </div>
+    </div>
+
+    <div class="card" id="attentionCard" hidden>
+      <h2>Needs you</h2>
+      <div id="attentionList" class="rows"></div>
+    </div>
+
+    <div class="card">
+      <h2>Recent days</h2>
+      <div id="dashDays" class="rows"></div>
+      <button id="btnAllDays" class="ghost small">See every day</button>
+    </div>
+
     <div class="period">
       <button class="chip" data-period="thisMonth">This month</button>
       <button class="chip" data-period="lastMonth">Last month</button>
@@ -62,18 +96,15 @@
 
     <div class="cards">
       <div class="card kpi out">
-        <span class="k">Spent</span>
-        <strong id="kpiSpent">—</strong>
+        <span class="k">Spent</span><strong id="kpiSpent">—</strong>
         <span class="sub" id="kpiSpentSub"></span>
       </div>
       <div class="card kpi in">
-        <span class="k">Received</span>
-        <strong id="kpiIn">—</strong>
+        <span class="k">Received</span><strong id="kpiIn">—</strong>
         <span class="sub" id="kpiInSub"></span>
       </div>
       <div class="card kpi net">
-        <span class="k">Net</span>
-        <strong id="kpiNet">—</strong>
+        <span class="k">Net</span><strong id="kpiNet">—</strong>
         <span class="sub" id="kpiNetSub"></span>
       </div>
     </div>
@@ -84,7 +115,7 @@
       <div id="reviewList"></div>
     </div>
 
-    <div class="card" id="qualityCard">
+  <div class="card" id="qualityCard">
       <h2>Data quality</h2>
       <p class="hint">
         How much of your inbox was understood. Anything unread is listed, never

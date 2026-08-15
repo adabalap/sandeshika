@@ -10,7 +10,7 @@
  */
 (() => {
   /** Bumped with every release; compared against the server to spot a stale cache. */
-  const BUILD = '1.9.0';
+  const BUILD = '1.10.0';
 
   const $ = (s) => document.querySelector(s);
   const $$ = (s) => Array.from(document.querySelectorAll(s));
@@ -176,6 +176,7 @@
       </div>`).join('') || '<p class="empty">Nothing yet.</p>';
 
     renderSpark(s.byDay, r);
+    renderDashboard();
     renderDaily();
     renderQuality();
     renderReview();
@@ -189,6 +190,125 @@
    * understood, and that number is normally invisible — which lets a parser
    * miss a whole message format while the totals still look plausible.
    */
+  /**
+   * The dashboard. Answers the four questions worth opening the app for:
+   * what have I spent today and this month, what do I owe soon, and what needs
+   * a decision from me.
+   */
+  function renderDashboard() {
+    const now = Date.now();
+    const todayKey = dayKey(now);
+    const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime();
+
+    const counted_ = txns.filter(counted);
+    const today = counted_.filter((t) => dayKey(t.date) === todayKey);
+    const month = counted_.filter((t) => t.date >= monthStart);
+    const sum = (list) => list.filter(isSpend).reduce((a, t) => a + t.amount, 0)
+      - list.filter(isRefund).reduce((a, t) => a + t.amount, 0);
+
+    const tSpend = Math.max(0, sum(today));
+    const mSpend = Math.max(0, sum(month));
+    $('#dashToday').textContent = tSpend ? inrShort(tSpend) : '₹0';
+    $('#dashToday').title = inr(tSpend);
+    $('#dashTodaySub').textContent = today.length
+      ? `${today.length} transaction${today.length > 1 ? 's' : ''}`
+      : 'nothing yet today';
+
+    // Pace, not just position: "on track" is the useful part of a month total.
+    const dayOfMonth = new Date().getDate();
+    const projected = mSpend / dayOfMonth * new Date(
+      new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
+    $('#dashMonth').textContent = inrShort(mSpend);
+    $('#dashMonth').title = inr(mSpend);
+    $('#dashMonthSub').textContent = dayOfMonth > 2
+      ? `on pace for ${inrShort(projected)}` : `${month.length} transactions`;
+
+    const open = bills.filter((b) => b.status === 'open');
+    const soon = open.filter((b) => { const d = O.daysUntil(b.dueAt, now); return d !== null && d >= 0 && d <= 7; });
+    const late = open.filter((b) => { const d = O.daysUntil(b.dueAt, now); return b.overdue || (d !== null && d < 0); });
+    $('#dashDue').textContent = soon.length ? inrShort(soon.reduce((a, b) => a + (b.amount || 0), 0)) : '—';
+    $('#dashDueSub').textContent = soon.length
+      ? soon.map((b) => b.issuer).slice(0, 2).join(', ') : 'nothing due';
+    $('#dashOverdue').textContent = late.length ? inrShort(late.reduce((a, b) => a + (b.amount || 0), 0)) : '—';
+    $('#dashOverdue').className = late.length ? 'neg' : '';
+    $('#dashOverdueSub').textContent = late.length ? `${late.length} bill${late.length > 1 ? 's' : ''}` : 'all clear';
+
+    // things awaiting a decision
+    const review = txns.filter((t) => t.needsReview && !t.reviewed);
+    const pairs = O.findTransferPairs(txns.filter((t) => t.date >= now - 60 * 864e5));
+    const items = [];
+    if (pairs.length) {
+      items.push(`<div class="row">
+        <span class="dot" style="background:#4C8DF6"></span>
+        <div class="row-main"><strong>${pairs.length} possible transfer${pairs.length > 1 ? 's' : ''} between your accounts</strong>
+        <span class="row-sub">A matching debit and credit — counting both inflates spending and income</span></div>
+        <button class="mini ok" id="btnShowPairs">Review</button></div>`);
+    }
+    if (review.length) {
+      items.push(`<div class="row">
+        <span class="dot" style="background:#F4A62E"></span>
+        <div class="row-main"><strong>${review.length} transaction${review.length > 1 ? 's' : ''} to confirm</strong>
+        <span class="row-sub">Excluded from totals until you do</span></div></div>`);
+    }
+    if (late.length) {
+      items.push(`<div class="row">
+        <span class="dot" style="background:#E8635A"></span>
+        <div class="row-main"><strong>${late.length} overdue bill${late.length > 1 ? 's' : ''}</strong>
+        <span class="row-sub">${esc(late.map((b) => b.issuer).slice(0, 3).join(', '))}</span></div></div>`);
+    }
+    $('#attentionCard').hidden = !items.length;
+    $('#attentionList').innerHTML = items.join('');
+
+    // last seven days, tappable
+    const byDay = {};
+    for (const t of counted_.filter((x) => x.date >= now - 7 * 864e5)) {
+      const k = dayKey(t.date);
+      byDay[k] = (byDay[k] || 0) + (isSpend(t) ? t.amount : 0);
+    }
+    const days = Object.entries(byDay).sort((a, b) => (a[0] < b[0] ? 1 : -1)).slice(0, 7);
+    const max = Math.max(1, ...days.map(([, v]) => v));
+    $('#dashDays').innerHTML = days.map(([k, v]) => {
+      const d = new Date(k + 'T00:00:00');
+      return `<div class="row day-row" data-day="${k}">
+        <div class="row-main"><strong>${d.toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short' })}</strong>
+          <div class="bar-track" style="margin-top:5px"><div class="bar-fill" style="width:${(v / max) * 100}%;background:#1FAE7A"></div></div>
+        </div><span class="row-amt debit">${inr(v)}</span></div>`;
+    }).join('') || '<p class="empty">No spending in the last week.</p>';
+  }
+
+  /** Shows the suggested pairs and lets both sides be reclassified at once. */
+  function showPairs() {
+    const pairs = O.findTransferPairs(txns.filter((t) => t.date >= Date.now() - 60 * 864e5));
+    if (!pairs.length) return banner('No transfer pairs found');
+    $('#attentionList').innerHTML = pairs.map((p, i) => `
+      <div class="row pair-row" data-i="${i}">
+        <span class="dot" style="background:#4C8DF6"></span>
+        <div class="row-main">
+          <strong>${inrExact(p.amount)} out and back in</strong>
+          <span class="row-sub">${fmtDate(p.debit.date)} · ${esc(p.debit.merchant || 'unknown')}
+            ${p.debit.account ? '••' + p.debit.account : ''} →
+            ${p.credit.account ? '••' + p.credit.account : 'another account'}</span>
+        </div>
+        <button class="mini ok" data-pair="yes">Both transfers</button>
+        <button class="mini no" data-pair="no">Keep as is</button>
+      </div>`).join('');
+    window.__pairs = pairs;
+  }
+
+  async function markPairAsTransfer(i) {
+    const p = (window.__pairs || [])[i];
+    if (!p) return;
+    try {
+      await SandeshikaApi.putMany([p.debit, p.credit].map((t) => ({
+        key: SandeshikaApi.Keys.txn(t.fingerprint),
+        value: JSON.stringify({ ...t, kind: 'transfer', category: 'transfer',
+                                categorySource: 'user', needsReview: false, reviewed: true }),
+      })));
+      banner(`${inrExact(p.amount)} marked as a transfer — removed from both spending and income`);
+      await reload();
+    } catch (e) { banner(friendly(e), 'error'); }
+  }
+
   function renderQuality() {
     const el = $('#qualityBody');
     if (!txns.length) {
@@ -1235,6 +1355,20 @@
     if (!confirm(`Forget the category you set for "${mk}"? Past transactions keep their current label.`)) return;
     try { await SandeshikaApi.forgetRule(mk); banner('Forgotten'); renderLearned(); }
     catch (err) { banner(friendly(err), 'error'); }
+  });
+
+  $('#btnAllDays').addEventListener('click', () => activate('daily'));
+  $('#dashDays').addEventListener('click', (e) => {
+    const row = e.target.closest('.day-row');
+    if (row) { activate('daily'); renderDay(row.dataset.day); }
+  });
+  $('#attentionList').addEventListener('click', (e) => {
+    if (e.target.id === 'btnShowPairs') return showPairs();
+    const b = e.target.closest('button[data-pair]');
+    if (!b) return;
+    const row = b.closest('.pair-row');
+    if (b.dataset.pair === 'yes') markPairAsTransfer(Number(row.dataset.i));
+    else { row.remove(); }
   });
 
   $('#btnAsk').addEventListener('click', ask);

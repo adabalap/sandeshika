@@ -268,7 +268,58 @@
     return Math.round((a.getTime() - b.getTime()) / day);
   }
 
+  /**
+   * Finds debit/credit pairs that are really one movement between the user's
+   * own accounts.
+   *
+   * Wording does not always give it away: "Rs.5000 debited from XX1234" and
+   * "Rs.5000 credited to XX5678" name no merchant and read like a payment and
+   * an unrelated income. Left alone, one transfer inflates BOTH spending and
+   * income by the same amount, and the net figure looks right while every
+   * component is wrong.
+   *
+   * Matching is deliberately conservative: same amount to the paisa, same day,
+   * opposite directions, different accounts, and neither side naming a
+   * recognisable third-party merchant. Anything looser starts eating real
+   * refunds. Pairs are SUGGESTED, never applied silently -- a wrong merge hides
+   * a real expense, which is exactly the error a spending app must not make on
+   * its own.
+   */
+  function findTransferPairs(txns, windowMs = 864e5) {
+    const debits = txns.filter((t) => t.kind === 'expense' && !t.pairedWith);
+    const credits = txns.filter((t) => t.kind === 'income' && !t.pairedWith);
+    const used = new Set();
+    const pairs = [];
+
+    for (const d of debits) {
+      const match = credits.find((c) => !used.has(c.fingerprint)
+        && c.amount === d.amount
+        && Math.abs(c.date - d.date) <= windowMs
+        && (c.account || '?') !== (d.account || '?')
+        && !namesAThirdParty(d) && !namesAThirdParty(c));
+      if (match) {
+        used.add(match.fingerprint);
+        pairs.push({ debit: d, credit: match, amount: d.amount });
+      }
+    }
+    return pairs;
+  }
+
+  /**
+   * True when the merchant looks like a real payee rather than blank or a bank
+   * artefact. A named third party means it is a payment, not a self-transfer.
+   */
+  function namesAThirdParty(t) {
+    const m = (t.merchant || '').trim();
+    if (!m) return false;
+    if (/^(unknown|self|own)$/i.test(m)) return false;
+    // A person's name is not evidence either way: paying a friend and moving
+    // money to your own account look identical from the text.
+    return !(t.merchantQuality === 'phone' || t.merchantQuality === 'opaque');
+  }
+
   const API = { TAB, classify, extractBill, parseDueDate, parseDueAmount, daysUntil,
+                findTransferPairs, namesAThirdParty,
                 SPAM_RE, BILL_RE, PROMO_RE };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = API;

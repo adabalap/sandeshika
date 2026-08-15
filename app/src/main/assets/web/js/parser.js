@@ -172,6 +172,19 @@ const INTERNAL_RE = new RegExp([
   String.raw`\btowards\b.{0,40}\bcredit card\b`,
   String.raw`\bauto ?debit\b.{0,40}\bcredit card\b`,
   String.raw`\bcredit card\b.{0,30}\bthrough auto ?debit\b`,
+  // Toll and transit wallets. A FASTag recharge is money moving from the bank
+  // to another pocket of the user's own, so counting the debit as spending and
+  // the credit as income double-counts it in both directions.
+  String.raw`\bfastag\b`,
+  String.raw`\bnetc\b`,
+  String.raw`\bmetro (card|smart ?card)\b.{0,20}\b(recharg|top ?up|load)`,
+  // Any wallet or prepaid instrument being loaded.
+  String.raw`\b(wallet|prepaid (card|instrument))\b.{0,24}\b(recharg|top ?up|load|credit)`,
+  String.raw`\b(recharg\w*|top ?up|loaded)\b.{0,24}\b(wallet|fastag|netc)\b`,
+  // Explicit movement between the user's own accounts.
+  String.raw`\btransferred to your\b`,
+  String.raw`\bby transfer from a\/c\b`,
+  String.raw`\bto your (own )?(a\/c|account|wallet)\b`,
 ].join('|'), 'i');
 
 // ---------------------------------------------------------------------------
@@ -231,7 +244,7 @@ function parseAmount(text) {
  * single largest gap: hundreds of genuine payments were being discarded as
  * "no-direction" because the list only had "sent to".
  */
-const DEBIT_RE  = /\b(debited|spent|withdrawn|paid|purchase|deducted|sent|transferred to|txn of|charged|processed payment of|payment of|done for)\b/i;
+const DEBIT_RE  = /\b(debited|spent|withdrawn|paid|purchase|deducted|sent|transferred to|txn of|charged|processed payment of|payment of|done for|recharged with|loaded with)\b/i;
 const CREDIT_RE = /\b(credited|received|deposited|refund(ed)?|reversal|cashback of|added to)\b/i;
 
 function parseDirection(text) {
