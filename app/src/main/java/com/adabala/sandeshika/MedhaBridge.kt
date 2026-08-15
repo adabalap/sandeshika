@@ -109,6 +109,21 @@ class MedhaBridge(
                 resolve(id, 400, err("A Medha API token is required"))
                 return@launch
             }
+            // Medha shows tokens shortened in its client list ("ac0328…e4b4").
+            // Selecting that text copies the ellipsis; the server then returns a
+            // generic 401 and the user looks for the fault in the wrong place.
+            if (useToken.contains("\u2026") || useToken.contains("...")) {
+                resolve(id, 400, err(
+                    "That is the shortened token Medha shows in the list, not the real one. " +
+                        "In Medha: API clients \u2192 tap the client \u2192 Copy token."))
+                return@launch
+            }
+            if (!Regex("[0-9a-f]{32,64}").matches(useToken)) {
+                resolve(id, 400, err(
+                    "A Medha token is 40 hexadecimal characters; this is ${useToken.length}. " +
+                        "Use API clients \u2192 tap the client \u2192 Copy token."))
+                return@launch
+            }
 
             val health = call("GET", "$cleanUrl/health", null, null, null)
             if (health.first != 200) {
@@ -150,7 +165,7 @@ class MedhaBridge(
     fun detect(id: String) {
         scope.launch {
             val found = org.json.JSONArray()
-            for (port in intArrayOf(8080, 8001, 8000, 8081, 5001, 9090)) {
+            for (port in intArrayOf(8001, 8080, 8000, 8081, 5001, 9090)) {
                 val base = "http://127.0.0.1:$port"
                 val (code, body) = call("GET", "$base/health", null, null, null)
                 if (code != 200) continue
@@ -283,7 +298,7 @@ class MedhaBridge(
 
     companion object {
         private const val TAG = "MedhaBridge"
-        private const val DEFAULT_URL = "http://127.0.0.1:8080"
+        private const val DEFAULT_URL = "http://127.0.0.1:8001"
         private const val KEY_URL = "medha_url"
         private const val KEY_TOKEN = "medha_token"
 

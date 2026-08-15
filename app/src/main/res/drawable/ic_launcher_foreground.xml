@@ -1,34 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Rupee in a speech bubble. Content stays inside the 66dp adaptive keyline. -->
+<!--
+  Solid bubble, heavy rupee, one accent bar. An outlined mark turns to mush at
+  launcher sizes; a filled shape with thick strokes survives the downscale.
+  Content stays inside the 66dp adaptive keyline.
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
 
-    <path android:pathData="M27,29 h54 a11,11 0 0 1 11,11 v30 a11,11 0 0 1 -11,11 h-33 l-15,11.2 v-11.2 h-6 a11,11 0 0 1 -11,-11 v-30 a11,11 0 0 1 11,-11 z"
-        android:fillColor="#520A2E52" android:strokeColor="#FFEAF4FC" android:strokeWidth="4.2" android:strokeLineJoin="round" />
+    <path android:pathData="M25,26 h58 a9,9 0 0 1 9,9 v34 a9,9 0 0 1 -9,9 h-38 l-18,12.8 v-12.8 h-2 a9,9 0 0 1 -9,-9 v-34 a9,9 0 0 1 9,-9 z"
+        android:fillColor="#FFFFFFFF" />
 
     <group>
-        <path android:pathData="M38,42 h24" android:strokeColor="#FFFFFFFF" android:strokeWidth="5" android:strokeLineCap="round" />
-        <path android:pathData="M38,50.4 h24" android:strokeColor="#FFFFFFFF" android:strokeWidth="5" android:strokeLineCap="round" />
-        <path android:pathData="M38,58.8 h11.8 c8,0 12.2,-4.2 12.2,-8.4" android:strokeColor="#FFFFFFFF" android:strokeWidth="5" android:strokeLineCap="round" />
-        <path android:pathData="M38,58.8 L59.2,74" android:strokeColor="#FFFFFFFF" android:strokeWidth="5" android:strokeLineCap="round" />
+        <path android:pathData="M37,39.6 h24.8" android:strokeColor="#FF0B3E8C" android:strokeWidth="6.2" android:strokeLineCap="round" />
+        <path android:pathData="M37,49.2 h24.8" android:strokeColor="#FF0B3E8C" android:strokeWidth="6.2" android:strokeLineCap="round" />
+        <path android:pathData="M37,58.8 h11.2 c8.4,0 13.6,-4.8 13.6,-9.6" android:strokeColor="#FF0B3E8C" android:strokeWidth="6.2" android:strokeLineCap="round" />
+        <path android:pathData="M37,58.8 L59.2,74.4" android:strokeColor="#FF0B3E8C" android:strokeWidth="6.2" android:strokeLineCap="round" />
     </group>
 
-    <path android:pathData="M68.4,63.8 h6 v10.2 h-6 z">
-        <aapt:attr name="android:fillColor">
-            <gradient android:startX="0" android:startY="63" android:endX="0" android:endY="74" android:type="linear">
-                <item android:offset="0.0" android:color="#FFFFD97A" />
-                <item android:offset="1.0" android:color="#FFF2952B" />
-            </gradient>
-        </aapt:attr>
-    </path>
-    <path android:pathData="M77.2,55.4 h6 v18.6 h-6 z">
-        <aapt:attr name="android:fillColor">
-            <gradient android:startX="0" android:startY="55" android:endX="0" android:endY="74" android:type="linear">
-                <item android:offset="0.0" android:color="#FFFFD97A" />
-                <item android:offset="1.0" android:color="#FFF2952B" />
-            </gradient>
-        </aapt:attr>
-    </path>
+    <path android:pathData="M70.4,50.8 h8.8 v23.6 h-8.8 z" android:fillColor="#FFF5A623" />
 </vector>

@@ -692,7 +692,7 @@
     // was in the environment, which left anyone with a stale env token unable
     // to fix it from the only screen that offers to.
     url.disabled = false; tok.disabled = false; $('#btnSaveToken').disabled = false;
-    url.value = cfg.medhaUrl || cfg.defaultMedhaUrl || 'http://127.0.0.1:8080';
+    url.value = cfg.medhaUrl || cfg.defaultMedhaUrl || 'http://127.0.0.1:8001';
 
     const parts = [];
     if (cfg.tokenConfigured) {
