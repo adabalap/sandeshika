@@ -408,8 +408,18 @@ async function catchUp() {
  * Returns how many past rows were changed, so the UI can say so rather than
  * leaving the user to wonder whether it took.
  */
-/** The kind implied by a category, given the direction of the money. */
+const KINDS = ['expense', 'income', 'refund', 'transfer'];
+
+/**
+ * The kind implied by a category, given the direction of the money.
+ *
+ * A kind the user set by hand is never overridden. Category and kind are
+ * related but not the same: a "bills" payment to your own credit card is a
+ * transfer, and a "shopping" credit is a refund rather than income. Deriving
+ * kind from category alone silently undoes a correction they already made.
+ */
 function kindFor(category, txn) {
+  if (txn && txn.kindSource === 'user' && txn.kind) return txn.kind;
   if (category === 'transfer' || category === 'investment') return 'transfer';
   if (txn.direction === 'credit') return txn.kind === 'refund' ? 'refund' : 'income';
   return 'expense';
@@ -453,6 +463,46 @@ async function correctCategory(merchant, category, opts = {}) {
   return { merchantKey: mk, updated: touched.length };
 }
 
+/**
+ * Sets the kind directly.
+ *
+ * `kind` decides whether an amount is counted as spending, income, or excluded
+ * entirely, so it is the single most consequential field on a transaction — and
+ * until now it could only be changed indirectly, by picking a category that
+ * happened to imply the right one. That is an odd way to ask someone to fix a
+ * ₹5,000 error.
+ *
+ * Scope defaults to this transaction only: two payments to the same merchant
+ * can legitimately differ (a Paytm payment to a shop vs a Paytm wallet load).
+ */
+async function setKind(txn, kind, opts = {}) {
+  if (!KINDS.includes(kind)) throw new ApiError(`'${kind}' is not a valid kind.`, 0, 0);
+
+  const write = (t) => ({
+    key: Keys.txn(t.fingerprint),
+    value: JSON.stringify({ ...t, kind, kindSource: 'user',
+                            needsReview: false, reviewed: true }),
+  });
+
+  if (!opts.merchantWide || !txn.merchant) {
+    await api(`/store/${Keys.txn(txn.fingerprint)}`,
+              { method: 'PUT', body: write(txn).value });
+    return { updated: 1 };
+  }
+
+  const mk = SandeshikaParser.merchantKey(txn.merchant);
+  const all = await loadTransactions();
+  const touched = all.filter((t) => SandeshikaParser.merchantKey(t.merchant) === mk
+    && t.direction === txn.direction && t.kind !== kind);
+  if (!touched.length) {
+    await api(`/store/${Keys.txn(txn.fingerprint)}`,
+              { method: 'PUT', body: write(txn).value });
+    return { updated: 1 };
+  }
+  await putMany(touched.map(write));
+  return { updated: touched.length };
+}
+
 /** Everything the app has been taught, for a screen that can show and undo it. */
 async function learnedRules() {
   const rows = await listPrefix('cat/', 5000);
@@ -470,7 +520,7 @@ async function forgetRule(merchantKey) {
 }
 
 window.SandeshikaApi = {
-  correctCategory, learnedRules, forgetRule, kindFor, SOURCE_RANK,
+  correctCategory, setKind, learnedRules, forgetRule, kindFor, KINDS, SOURCE_RANK,
   MEDHA, Store, api, batchCall, ApiError,
   loadTransactions, listPrefix, putMany, Keys,
   resolveCategory, primeCategoryCache, catCache,

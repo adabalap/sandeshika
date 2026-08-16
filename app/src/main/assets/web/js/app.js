@@ -10,7 +10,7 @@
  */
 (() => {
   /** Bumped with every release; compared against the server to spot a stale cache. */
-  const BUILD = '1.10.0';
+  const BUILD = '1.11.0';
 
   const $ = (s) => document.querySelector(s);
   const $$ = (s) => Array.from(document.querySelectorAll(s));
@@ -986,11 +986,38 @@
     $('#catScope').disabled = !t.merchant;
     if (!t.merchant) $('#catScope').value = 'one';
 
+    const KIND_LABEL = { expense: 'Spending', income: 'Income',
+                         refund: 'Refund', transfer: 'Transfer (own accounts)' };
+    $('#kindChips').innerHTML = SandeshikaApi.KINDS.map((k) => `
+      <button class="chip kind ${k === t.kind ? 'sel' : ''}" data-kind="${k}">${KIND_LABEL[k]}</button>`).join('');
+    $('#kindSaveState').innerHTML = t.kindSource === 'user'
+      ? '<span class="ok">You set this.</span>' : '';
+
     $('#catChips').innerHTML = allCategories().map((c) => `
       <button class="chip cat ${c === t.category ? 'sel' : ''}" data-cat="${c}">${c}</button>`).join('');
     $('#txnSaveState').innerHTML = '';
     $('#txnRaw').textContent = t.raw || '(not stored)';
     showView('txn');
+  }
+
+  async function setTxnKind(kind) {
+    const t = openTxn;
+    if (!t) return;
+    const el = $('#kindSaveState');
+    el.innerHTML = '<span class="warn">Saving…</span>';
+    try {
+      const wide = $('#catScope').value === 'merchant' && !!t.merchant;
+      const r = await SandeshikaApi.setKind(t, kind, { merchantWide: wide });
+      el.innerHTML = `<span class="ok">Counted as ${esc(kind)}`
+        + (r.updated > 1 ? ` — ${r.updated} transactions from "${esc(t.merchant)}" updated` : '')
+        + '.</span>';
+      await reload();
+      renderTxn(t.fingerprint);
+      if (openDay) renderDay(openDay);
+      showView('txn');
+    } catch (e) {
+      el.innerHTML = `<span class="err">${esc(friendly(e))}</span>`;
+    }
   }
 
   async function setCategory(cat) {
@@ -1339,6 +1366,10 @@
   $('#dayTxns').addEventListener('click', (e) => {
     const row = e.target.closest('.txn-row');
     if (row) renderTxn(row.dataset.fp);
+  });
+  $('#kindChips').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-kind]');
+    if (b) setTxnKind(b.dataset.kind);
   });
   $('#catChips').addEventListener('click', (e) => {
     const b = e.target.closest('button[data-cat]');

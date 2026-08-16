@@ -196,6 +196,15 @@
     <div class="card">
       <h2 id="txnTitle">Transaction</h2>
       <div id="txnFacts" class="rows"></div>
+      <h2 style="margin-top:16px">Counted as</h2>
+      <p class="hint">
+        This decides whether the amount is spending, income, or left out of both.
+        Transfers between your own accounts should be “transfer”, otherwise one
+        movement inflates spending and income at the same time.
+      </p>
+      <div class="suggest" id="kindChips"></div>
+      <div id="kindSaveState" class="state"></div>
+
       <h2 style="margin-top:16px">Category</h2>
       <p class="hint" id="txnCatHint"></p>
       <div class="suggest" id="catChips"></div>
