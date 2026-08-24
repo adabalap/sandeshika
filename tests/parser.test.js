@@ -1,4 +1,4 @@
-const P = require('../app/src/main/assets/web/js/parser.js');
+import * as P from '../static/js/core/parser.js';
 
 let pass = 0, fail = 0;
 const failures = [];

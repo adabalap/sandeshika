@@ -239,7 +239,6 @@ def cmd_mine(args):
 
 def load_parser():
     """Runs the real parser.js under Node so the audit matches the app exactly."""
-    import subprocess, tempfile
     js = os.path.join(os.path.dirname(HERE), "static", "js", "parser.js")
     if not os.path.exists(js):
         js = os.path.join(os.path.dirname(HERE), "app", "src", "main", "assets",
@@ -321,7 +320,7 @@ process.stdout.write(JSON.stringify(out));
                            "request", "emandate", "hold") else "   <- worth reviewing"
         print(f"  {n:6d}  {r}{flag}")
 
-    print(f"\ndates:")
+    print("\ndates:")
     print(f"  used the SMS arrival time : {fallback}")
     print(f"  ...though the text HAD a date : {len(claimed_but_fallback)}   <- these are wrong")
     if claimed_but_fallback:

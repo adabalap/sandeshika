@@ -2,7 +2,7 @@
  * Regression suite built from a REAL 5,000-message Indian bank inbox.
  * Every case here was observed in the field, not invented.
  */
-const P = require('../app/src/main/assets/web/js/parser.js');
+import * as P from '../static/js/core/parser.js';
 let pass = 0, fail = 0; const failures = [];
 const ok = (n, c, d = '') => { if (c) pass++; else { fail++; failures.push(`${n}  ${d}`); } };
 const T = Date.now();

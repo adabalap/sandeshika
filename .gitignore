@@ -1,8 +1,7 @@
-.gradle/
-/build/
-/app/build/
-local.properties
-*.iml
-.idea/
-.DS_Store
-!gradle/wrapper/gradle-wrapper.jar
+.venv/
+__pycache__/
+*.pyc
+node_modules/
+
+# Contains your Medha API token in plaintext. Never commit it.
+settings.json

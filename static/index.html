@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#3B2E7E" />
+<title>Sandeshika · సందేశిక</title>
+<link rel="manifest" href="/manifest.webmanifest" />
+<link rel="icon" href="/static/icons/icon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="/static/icons/icon-192.png" />
+<link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+<header class="app-bar">
+  <img src="/static/icons/icon.svg" alt="" class="mark" />
+  <div class="titles">
+    <h1>Sandeshika · సందేశిక</h1>
+    <p id="subtitle">Spending, bills and highlights from your messages</p>
+  </div>
+  <button id="btnRefresh" class="icon-btn" title="Check for new messages" aria-label="Check for new messages">
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+         stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1" />
+      <polyline points="20.5 4 20.5 9.2 15.3 9.2" />
+    </svg>
+  </button>
+  <button id="btnMenu" class="icon-btn" aria-label="Menu" aria-haspopup="true">
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+         stroke-width="2.2" stroke-linecap="round" aria-hidden="true">
+      <path d="M4 7h16M4 12h16M4 17h16"/>
+    </svg>
+  </button>
+</header>
+
+<!--
+  All navigation lives in one drawer.
+
+  A horizontal tab strip could not hold eight destinations: they scrolled off
+  the right edge and the ones past "Inbox" were effectively invisible. A drawer
+  holds them all, groups them, shows where you are, and gives back a whole row
+  of vertical space on every screen.
+-->
+<div id="drawer" class="drawer hidden">
+  <div class="drawer-panel" role="navigation">
+    <div class="drawer-head">
+      <strong>Sandeshika</strong>
+      <span id="drawerSub">సందేశిక</span>
+    </div>
+
+    <div class="drawer-group">Money</div>
+    <button class="nav-item active" data-view="overview">Dashboard</button>
+    <button class="nav-item" data-view="daily">Day by day</button>
+    <button class="nav-item" data-view="transactions">All transactions</button>
+    <button class="nav-item" data-view="bills">Bills &amp; due dates</button>
+
+    <div class="drawer-group">Messages</div>
+    <button class="nav-item" data-view="inbox">Inbox</button>
+    <button class="nav-item" data-view="ask">Ask a question</button>
+
+    <div class="drawer-group">Period</div>
+    <div class="period sheet-period">
+      <button class="chip sel" data-period="thisMonth">This month</button>
+      <button class="chip" data-period="lastMonth">Last month</button>
+      <button class="chip" data-period="last3">3 months</button>
+      <button class="chip" data-period="all">All time</button>
+    </div>
+
+    <div class="drawer-group">App</div>
+    <button class="nav-item" data-view="setup">Setup &amp; learning</button>
+    <button class="nav-item" id="btnAbout">About</button>
+  </div>
+</div>
+    <div class="sheet-head">Go to</div>
+    <button class="sheet-item" data-view="bills" role="menuitem">Bills &amp; due dates</button>
+    <button class="sheet-item" data-view="transactions" role="menuitem">All transactions</button>
+    <button class="sheet-item" data-view="ask" role="menuitem">Ask a question</button>
+    <button class="sheet-item" data-view="setup" role="menuitem">Setup &amp; learning</button>
+    <button class="sheet-item" id="btnAbout" role="menuitem">About Sandeshika</button>
+    <button class="sheet-item close" id="btnMenuClose" role="menuitem">Close</button>
+  </div>
+</div>
+
+<!--
+  Toast stack. A single banner element meant a second message overwrote the
+  first, so a success notice could erase the error explaining what went wrong.
+-->
+<div id="toasts" class="toasts" aria-live="polite" aria-relevant="additions"></div>
+
+<main>
+
+  <!-- ============================ OVERVIEW ============================ -->
+  <section id="view-overview" class="view">
+    <!-- At-a-glance dashboard: what did I spend, what do I owe, what needs me. -->
+    <div class="cards">
+      <div class="card kpi out">
+        <span class="k">Today</span><strong id="dashToday">—</strong>
+        <span class="sub" id="dashTodaySub"></span>
+      </div>
+      <div class="card kpi out">
+        <span class="k">This month</span><strong id="dashMonth">—</strong>
+        <span class="sub" id="dashMonthSub"></span>
+      </div>
+    </div>
+
+    <div class="cards">
+      <div class="card kpi net">
+        <span class="k">Due in 7 days</span><strong id="dashDue">—</strong>
+        <span class="sub" id="dashDueSub"></span>
+      </div>
+      <div class="card kpi">
+        <span class="k">Overdue</span><strong id="dashOverdue">—</strong>
+        <span class="sub" id="dashOverdueSub"></span>
+      </div>
+    </div>
+
+    <div class="card" id="attentionCard" hidden>
+      <h2>Needs you</h2>
+      <div id="attentionList" class="rows"></div>
+    </div>
+
+    <div class="card">
+      <h2>Recent days</h2>
+      <div id="dashDays" class="rows"></div>
+      <button id="btnAllDays" class="ghost small">See every day</button>
+    </div>
+
+    <p class="hint tight" id="periodLabel"></p>
+
+    <div class="cards">
+      <div class="card kpi out">
+        <span class="k">Spent</span><strong id="kpiSpent">—</strong>
+        <span class="sub" id="kpiSpentSub"></span>
+      </div>
+      <div class="card kpi in">
+        <span class="k">Received</span><strong id="kpiIn">—</strong>
+        <span class="sub" id="kpiInSub"></span>
+      </div>
+      <div class="card kpi net">
+        <span class="k">Net</span><strong id="kpiNet">—</strong>
+        <span class="sub" id="kpiNetSub"></span>
+      </div>
+    </div>
+
+    <div class="card" id="reviewCard" hidden>
+      <h2>Needs your review</h2>
+      <p class="hint">Low-confidence parses are excluded from totals until you confirm them.</p>
+      <div id="reviewList"></div>
+    </div>
+
+  <div class="card" id="qualityCard">
+      <h2>Data quality</h2>
+      <p class="hint">
+        How much of your inbox was understood. Anything unread is listed, never
+        silently dropped.
+      </p>
+      <div id="qualityBody" class="rows"></div>
+    </div>
+
+    <div class="card">
+      <h2>By category</h2>
+      <div id="catChart" class="bars"></div>
+    </div>
+
+    <div class="card">
+      <h2>Top merchants</h2>
+      <div id="merchantList" class="rows"></div>
+    </div>
+
+    <div class="card">
+      <h2>Daily spend</h2>
+      <div id="spark" class="spark"></div>
+    </div>
+  </section>
+
+  <!-- ========================== TRANSACTIONS ========================== -->
+  <section id="view-transactions" class="view hidden">
+    <div class="filters">
+      <input id="search" type="search" placeholder="Search merchant, amount, text…" />
+      <select id="filterCat"><option value="">All categories</option></select>
+    </div>
+    <div id="txnList" class="rows"></div>
+    <button id="loadMore" class="ghost hidden">Show more</button>
+  </section>
+
+  <!-- ============================= DAILY ============================= -->
+  <section id="view-daily" class="view hidden">
+    <div class="period" id="dailyPeriod">
+      <button class="chip sel" data-dperiod="thisMonth">This month</button>
+      <button class="chip" data-dperiod="last30">Last 30 days</button>
+      <button class="chip" data-dperiod="lastMonth">Last month</button>
+      <button class="chip" data-dperiod="all">All</button>
+    </div>
+
+    <div class="cards">
+      <div class="card kpi out">
+        <span class="k">Total</span><strong id="dTotal">—</strong>
+        <span class="sub" id="dTotalSub"></span>
+      </div>
+      <div class="card kpi net">
+        <span class="k">Daily average</span><strong id="dAvg">—</strong>
+        <span class="sub" id="dAvgSub"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Day by day</h2>
+      <p class="hint">
+        Tap a day to see the messages behind the number. Every figure here is a
+        sum of the transactions listed underneath it — nothing is estimated.
+      </p>
+      <div id="dayList" class="rows"></div>
+    </div>
+  </section>
+
+  <!-- day drill-down -->
+  <section id="view-day" class="view hidden">
+    <button id="btnBackDaily" class="ghost small">&#8592; Back to days</button>
+    <div class="card">
+      <h2 id="dayTitle">Day</h2>
+      <p class="hint" id="daySummary"></p>
+      <div id="dayTxns" class="rows"></div>
+    </div>
+  </section>
+
+  <!-- transaction detail -->
+  <section id="view-txn" class="view hidden">
+    <button id="btnBackDay" class="ghost small">&#8592; Back</button>
+    <div class="card">
+      <h2 id="txnTitle">Transaction</h2>
+      <div id="txnFacts" class="rows"></div>
+      <h2 style="margin-top:16px">Counted as</h2>
+      <p class="hint">
+        This decides whether the amount is spending, income, or left out of both.
+        Transfers between your own accounts should be “transfer”, otherwise one
+        movement inflates spending and income at the same time.
+      </p>
+      <div class="suggest" id="kindChips"></div>
+      <div id="kindSaveState" class="state"></div>
+
+      <h2 style="margin-top:16px">Category</h2>
+      <p class="hint" id="txnCatHint"></p>
+      <div class="suggest" id="catChips"></div>
+      <label class="fld" style="margin-top:6px">
+        <span>Apply to</span>
+        <select id="catScope">
+          <option value="merchant">Every transaction from this merchant</option>
+          <option value="one">Only this transaction</option>
+        </select>
+      </label>
+      <div id="txnSaveState" class="state"></div>
+      <h2 style="margin-top:16px">Where these figures came from</h2>
+      <p class="hint">
+        The message exactly as your bank sent it, with the parts Sandeshika read
+        marked. If a highlight is on the wrong text, the figure above is wrong.
+      </p>
+      <pre id="txnRaw" class="provenance"></pre>
+      <div id="txnTrace" class="trace"></div>
+    </div>
+  </section>
+
+  <!-- generic drill-down: every headline number opens the rows behind it -->
+  <section id="view-list" class="view hidden">
+    <button id="btnBackList" class="ghost small">&#8592; Back</button>
+    <div class="card">
+      <h2 id="listTitle">Details</h2>
+      <p class="hint" id="listSummary"></p>
+      <div id="listRows" class="rows"></div>
+    </div>
+  </section>
+
+  <!-- ============================= INBOX ============================= -->
+  <section id="view-inbox" class="view hidden">
+    <div class="period" id="inboxTabs">
+      <button class="chip sel" data-box="transactions">Spends</button>
+      <button class="chip" data-box="bills">Bills</button>
+      <button class="chip" data-box="updates">Updates</button>
+      <button class="chip" data-box="promotions">Promotions</button>
+      <button class="chip" data-box="personal">Personal</button>
+      <button class="chip" data-box="spam">Spam</button>
+    </div>
+    <input id="inboxSearch" type="search" placeholder="Search messages…" />
+    <p class="hint tight" id="inboxCount"></p>
+    <div id="inboxList" class="rows"></div>
+    <button id="inboxMore" class="ghost hidden">Show more</button>
+    <div class="card" id="inboxEmptyCard">
+      <p class="hint">
+        Nothing loaded yet. The inbox reads messages live from Medha — it never
+        copies them into storage. Run the import in Setup first.
+      </p>
+      <button id="btnLoadInbox">Load messages</button>
+    </div>
+  </section>
+
+  <!-- ============================= BILLS ============================= -->
+  <section id="view-bills" class="view hidden">
+    <div class="cards">
+      <div class="card kpi out">
+        <span class="k">Due in 7 days</span>
+        <strong id="kpiDueSoon">—</strong>
+        <span class="sub" id="kpiDueSoonSub"></span>
+      </div>
+      <div class="card kpi net">
+        <span class="k">Overdue</span>
+        <strong id="kpiOverdue">—</strong>
+        <span class="sub" id="kpiOverdueSub"></span>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Upcoming</h2>
+      <p class="hint">
+        Extracted from bill reminders in your inbox. Marking one paid only hides
+        it here — it does not pay anything.
+      </p>
+      <div id="billList" class="rows"></div>
+    </div>
+    <div class="card">
+      <h2>Settled</h2>
+      <div id="billDone" class="rows"></div>
+    </div>
+  </section>
+
+  <!-- ============================== ASK ============================== -->
+  <section id="view-ask" class="view hidden">
+    <div class="card">
+      <h2>Ask about your spending</h2>
+      <p class="hint">
+        Runs on the model inside your phone. Works in airplane mode.
+        Figures in the answer are computed here, not generated by the model.
+      </p>
+      <div class="suggest">
+        <button class="chip q">How much did I spend on food last month?</button>
+        <button class="chip q">What is my biggest expense this month?</button>
+        <button class="chip q">Am I spending more than last month?</button>
+      </div>
+      <textarea id="askInput" rows="2" placeholder="Ask a question…"></textarea>
+      <button id="btnAsk">Ask</button>
+      <div id="askOut" class="answer"></div>
+      <details id="askEvidence" hidden>
+        <summary>Figures used for this answer</summary>
+        <pre id="askFacts"></pre>
+      </details>
+    </div>
+  </section>
+
+  <!-- ============================= SETUP ============================= -->
+  <section id="view-setup" class="view hidden">
+    <div class="card">
+      <h2>1. Connect to Medha</h2>
+      <p class="hint">
+        In Medha: menu → <strong>API clients</strong> → Add client (id
+        <code>sandeshika</code>), grant it <code>sms.read</code>, then paste the
+        token here. It is stored on this server, never in the browser.
+      </p>
+
+      <label class="fld">
+        <span>Medha address</span>
+        <input id="medhaUrl" type="url" inputmode="url" spellcheck="false"
+               placeholder="http://127.0.0.1:8001" autocomplete="off" />
+      </label>
+      <p class="hint tight">
+        Match the port shown in the Medha app. Default here is 8001; change it here if
+        you set something else.
+      </p>
+
+      <label class="fld">
+        <span>API token</span>
+        <input id="tokenInput" type="password" placeholder="paste token"
+               autocomplete="off" spellcheck="false" />
+      </label>
+      <p class="hint tight" id="tokenHint"></p>
+
+      <div class="row-btns">
+        <button id="btnSaveToken">Save &amp; connect</button>
+        <button id="btnDetect" class="ghost">Find Medha</button>
+        <button id="btnRecheck" class="ghost">Re-check</button>
+      </div>
+      <button id="btnClearSaved" class="ghost small" hidden>Forget saved settings</button>
+      <div id="connState" class="state"></div>
+      <button id="btnDiagnose" class="ghost small">Run diagnostics</button>
+      <pre id="diagOut" hidden></pre>
+    </div>
+
+    <div class="card">
+      <h2>2. Import your history</h2>
+      <p class="hint">
+        Reads bank SMS already on this phone. Runs at background priority, so
+        Medha pauses it if the phone gets warm and resumes when it cools.
+        Safe to close — it continues where it stopped.
+      </p>
+      <div class="progress-wrap">
+        <div class="progress"><div id="progressBar"></div></div>
+        <span id="progressText">Not started</span>
+      </div>
+      <div class="row-btns">
+        <button id="btnImport">Start import</button>
+        <button id="btnRestart" class="ghost">Re-scan everything</button>
+        <button id="btnStop" class="ghost hidden">Stop</button>
+      </div>
+      <p class="hint tight" id="importHint"></p>
+      <div id="importStats" class="stats"></div>
+      <div id="driftCard" class="drift" hidden>
+        <strong>Unrecognised messages from your bank</strong>
+        <p class="hint">
+          These came from a registered bank sender but did not match any known
+          format — usually a template change. They are not counted anywhere.
+          Share them and the parser can be taught the pattern.
+        </p>
+
+        <div class="seg" role="tablist" aria-label="Message view">
+          <button class="seg-btn sel" data-drift="safe" role="tab" aria-selected="true">
+            Safe to share
+          </button>
+          <button class="seg-btn" data-drift="original" role="tab" aria-selected="false">
+            Original
+          </button>
+        </div>
+
+        <p class="hint privacy-note" id="driftPrivacy"></p>
+        <div id="driftList"></div>
+
+        <div class="row-actions">
+          <button id="btnCopyDrift" class="primary small">Copy safe version</button>
+          <button id="btnDownloadDrift" class="ghost small">Save as a file</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Privacy</h2>
+      <p class="hint">
+        Message text is read from the phone on demand and never uploaded. Only
+        what is extracted — amounts, merchants, categories, due dates — is
+        stored, inside Medha, on this device. The API token is held by the
+        Sandeshika server process, never by this browser. No cloud, no account.
+      </p>
+      <h2 style="margin-top:18px">What Sandeshika has learned</h2>
+      <p class="hint">
+        Categories you corrected. These override every built-in rule and the
+        model, and are applied to past transactions as well as new ones.
+      </p>
+      <div id="learnedList" class="rows"></div>
+
+      <h2 style="margin-top:18px">Your categories</h2>
+      <p class="hint">
+        Add categories that fit how you actually spend. They appear alongside
+        the built-in ones everywhere a category can be chosen.
+      </p>
+      <div id="customCatList" class="rows"></div>
+      <label class="fld">
+        <span>New category</span>
+        <input id="newCat" type="text" placeholder="e.g. school fees" maxlength="24" />
+      </label>
+      <button id="btnAddCat" class="ghost small">Add category</button>
+
+      <h2 style="margin-top:18px">Export</h2>
+      <p class="hint">
+        Your data, in open formats, whenever you want it. Nothing here is
+        proprietary and nothing is locked in.
+      </p>
+      <div class="row-btns">
+        <button id="btnExportCsv" class="ghost">Transactions CSV</button>
+        <button id="btnExportJson" class="ghost">Everything JSON</button>
+      </div>
+      <button id="btnReset" class="danger">Delete all Sandeshika data</button>
+    </div>
+  </section>
+</main>
+
+<!--
+  One entry point. The previous build listed five scripts whose correctness
+  depended on load order and on each file hanging itself off `window`; a
+  reordering would have broken the app silently. ES modules make the graph
+  explicit and let the toolchain check it.
+-->
+<script type="module" src="/static/js/main.js"></script>
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js', { scope: '/' }).then((reg) => {
+    // Check for a new worker on every load. Without this an installed PWA can
+    // keep an old worker -- and therefore old JS -- indefinitely, which is
+    // exactly how a device ended up running week-old code that looked correct
+    // in the repository.
+    reg.update().catch(() => {});
+    reg.addEventListener('updatefound', () => {
+      const sw = reg.installing;
+      if (!sw) return;
+      sw.addEventListener('statechange', () => {
+        // A new worker took over while an old page is on screen: reload once so
+        // the code running matches the code that shipped.
+        if (sw.state === 'activated' && navigator.serviceWorker.controller) {
+          location.reload();
+        }
+      });
+    });
+  }).catch(() => {});
+}
+</script>
+</body>
+</html>

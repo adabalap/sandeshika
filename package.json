@@ -1,0 +1,26 @@
+{
+  "name": "sandeshika",
+  "version": "2.1.0",
+  "description": "Sandeshika \u00b7 \u0c38\u0c02\u0c26\u0c47\u0c36\u0c3f\u0c15 \u2014 private spending, bills and inbox insight from the SMS already on your phone.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node tests/run.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "check": "npm run lint && npm run typecheck && npm test",
+    "serve": "python3 app.py",
+    "serve:mock": "python3 app.py --mock"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.13.0",
+    "eslint": "^9.13.0",
+    "globals": "^15.11.0",
+    "jsdom": "^25.0.0",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

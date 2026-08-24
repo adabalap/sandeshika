@@ -3,9 +3,9 @@
  * Misfiling is the failure mode that makes an organiser useless, so each case
  * asserts the exact tab.
  */
-const P = require('../app/src/main/assets/web/js/parser.js');
+import * as P from '../static/js/core/parser.js';
 global.SandeshikaParser = P;
-const O = require('../app/src/main/assets/web/js/organizer.js');
+import * as O from '../static/js/core/organizer.js';
 
 let pass = 0, fail = 0; const failures = [];
 const ok = (n, c, d = '') => { if (c) pass++; else { fail++; failures.push(`${n}  ${d}`); } };
@@ -167,6 +167,66 @@ ok('no bill from a plain promo', O.extractBill(sms('Shop now and save big! T&C a
   const b = O.extractBill(sms('HDFC Credit Card XX2003 bill of Rs.5,000 due on 15-Aug-26.'));
   ok('different accounts stay separate', a.fingerprint !== b.fingerprint,
      `${a.fingerprint} vs ${b.fingerprint}`);
+}
+
+
+// ==========================================================================
+// SELF-TRANSFERS. One movement between the user's own accounts produces a
+// debit AND a credit. Counted naively it inflates spending and income by the
+// same amount, so the net looks right while every component is wrong.
+// ==========================================================================
+{
+  const wallets = [
+    'HDFC NETC FASTag 19000009944 has been recharged with Rs.1000.00',
+    'Rs.1000.00 credited to your HDFC NETC FASTag wallet',
+    'Rs.500 debited from a/c XX1234 for Paytm wallet top-up',
+    'Rs.5000 debited from a/c XX1234 transferred to your HDFC UPI account',
+    'Rs.5000.00 credited to a/c XX5678 by transfer from a/c XX1234',
+  ];
+  for (const b of wallets) {
+    const r = P.parse(sms(b));
+    ok(`wallet/self-transfer: ${b.slice(0, 44)}`, r.ok && r.txn.kind === 'transfer',
+       r.ok ? `kind=${r.txn.kind}` : `rejected ${r.reason}`);
+  }
+  // and real money still counts
+  const spend = P.parse(sms('Rs.450 debited from a/c XX1234 to VPA swiggy@ybl on 05-08-25'));
+  ok('ordinary spend unaffected', spend.txn.kind === 'expense');
+  const salary = P.parse(sms('Rs.85,000.00 credited to a/c XX1234 by NEFT from ACME TECH'));
+  ok('salary still income', salary.txn.kind === 'income');
+}
+
+// pairing, for the cases the wording does not reveal
+{
+  const day = new Date(2026, 7, 14).getTime();
+  const mk = (o) => Object.assign({ fingerprint: Math.random().toString(36).slice(2),
+    currency: 'INR', merchant: null, account: null }, o);
+  const set = [
+    mk({ kind: 'expense', amount: 5000, date: day, account: '1234' }),
+    mk({ kind: 'income', amount: 5000, date: day + 36e5, account: '5678' }),
+    mk({ kind: 'expense', amount: 7868, date: day, merchant: 'Rajdhani Rice Depot', account: '1234' }),
+    mk({ kind: 'income', amount: 85000, date: day, merchant: 'ACME TECH', account: '1234' }),
+    mk({ kind: 'expense', amount: 499, date: day, merchant: 'MYNTRA', account: '1234' }),
+    mk({ kind: 'income', amount: 499, date: day + 72e5, merchant: 'MYNTRA', account: '1234' }),
+  ];
+  const pairs = O.findTransferPairs(set);
+  ok('unnamed debit/credit pair detected', pairs.length === 1 && pairs[0].amount === 5000,
+     JSON.stringify(pairs.map((p) => p.amount)));
+  ok('a real refund is NOT paired away', !pairs.some((p) => p.amount === 499));
+  ok('salary is NOT paired away', !pairs.some((p) => p.amount === 85000));
+
+  // same account on both sides is not a transfer between accounts
+  const same = O.findTransferPairs([
+    mk({ kind: 'expense', amount: 300, date: day, account: '1234' }),
+    mk({ kind: 'income', amount: 300, date: day + 36e5, account: '1234' }),
+  ]);
+  ok('same account is not paired', same.length === 0);
+
+  // and a week apart is not one movement
+  const far = O.findTransferPairs([
+    mk({ kind: 'expense', amount: 300, date: day, account: '1234' }),
+    mk({ kind: 'income', amount: 300, date: day + 7 * 864e5, account: '5678' }),
+  ]);
+  ok('far apart in time is not paired', far.length === 0);
 }
 
 console.log(`\n${'-'.repeat(50)}\npassed=${pass}  failed=${fail}`);
