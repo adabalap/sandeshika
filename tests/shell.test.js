@@ -204,12 +204,38 @@ ok('every element id the UI writes to exists in index.html', dangling.length ===
 
   ok('tests/ contains test files', testFiles.length > 0);
 
+  /*
+   * Files this release ships. Extracting a release archive over a working tree
+   * adds and overwrites but NEVER deletes, so a suite removed upstream survives
+   * in the checkout and keeps failing — with an error about its contents rather
+   * than about the fact that it should no longer exist.
+   *
+   * Naming the expected set turns "fix this file" into "delete this file",
+   * which is the actual remedy.
+   */
+  const SHIPPED = new Set([
+    'analytics.test.js', 'boot.test.js', 'e2e.test.js', 'learning.test.js',
+    'model.test.js', 'organizer.test.js', 'parser.test.js', 'pipeline.test.js',
+    'provenance.test.js', 'realcorpus.test.js', 'redact.test.js',
+    'shell.test.js', 'transport.test.js', 'run.js',
+  ]);
+
+  const strays = testFiles.filter((f) => !SHIPPED.has(f));
+  ok('tests/ contains no files left over from an earlier release',
+    strays.length === 0,
+    `${strays.join(', ')}\n     `
+    + 'These are not part of this release. If they came from an older version, '
+    + 'delete them (git rm tests/<name>). If one is yours, add it to SHIPPED here.');
+
   for (const f of testFiles) {
     // This file names the very patterns it forbids, in its own regexes and
     // comments, so it would fail its own check. Skipping it is the honest fix;
     // narrowing the patterns until they miss their own source would weaken
     // them for every other file.
     if (f === 'shell.test.js') continue;
+    // Already reported above as a leftover; auditing its contents would bury
+    // the useful message under an irrelevant one.
+    if (!SHIPPED.has(f)) continue;
 
     /*
      * Comments are stripped before scanning. A file that explains in prose why

@@ -153,6 +153,13 @@ stays clean of the permission.
 
 ---
 
+## Upgrading
+
+Extracting a release over a working tree **never deletes** files removed
+upstream, so a suite deleted in a new version survives locally and fails with a
+confusing error. See [UPGRADING.md](UPGRADING.md) — `tests/shell.test.js` now
+names leftovers explicitly.
+
 ## Tests
 
 ```bash
