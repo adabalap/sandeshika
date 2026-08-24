@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<data-extraction-rules>
-    <!-- The token is a credential; it must not ride along in a cloud backup. -->
-    <cloud-backup><exclude domain="sharedpref" path="sandeshika_secure.xml" /></cloud-backup>
-    <device-transfer><exclude domain="sharedpref" path="sandeshika_secure.xml" /></device-transfer>
-</data-extraction-rules>
