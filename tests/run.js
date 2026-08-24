@@ -18,7 +18,8 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 // test spends ten seconds confirming the same thing.
 const ORDER = [
   'format', 'analytics', 'parser', 'organizer', 'model',
-  'transport', 'learning', 'pipeline', 'realcorpus', 'shell', 'boot', 'e2e',
+  'transport', 'learning', 'pipeline', 'realcorpus', 'shell', 'native-bridge',
+  'boot', 'e2e',
 ];
 
 const files = fs.readdirSync(HERE)

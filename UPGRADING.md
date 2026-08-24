@@ -13,6 +13,44 @@ this already:
 | `tests/e2e_flask.js` | 2.1.0 — replaced by `tests/e2e.test.js` | `__dirname is not defined`, and it imported `static/js/api.js`, split up in 2.0.0 |
 | `tests/bridge.test.js` | never shipped by this project | `require is not defined in ES module scope` |
 
+## Workflow steps that no longer apply
+
+The v1 APK committed its web assets under `app/src/main/assets/web/` and kept
+the bridge in a file called `bridge.js`. Neither is true now, so a workflow step
+carried over from then fails like this:
+
+```
+grep: app/src/main/assets/web/js/bridge.js: No such file or directory
+```
+
+Two things changed:
+
+- **The bridge moved.** It is `static/js/data/transport.js` on the web side and
+  `app/src/main/java/.../MedhaBridge.kt` on the native side. There is no
+  `bridge.js`.
+- **Assets are generated, not committed.** `app/build.gradle.kts` syncs
+  `static/` into `app/build/generated/webAssets/web` at build time, so one copy
+  of the front end serves both the browser build and the APK. Two committed
+  copies drift apart within a week.
+
+Replace any step that greps for bridge methods with:
+
+```yaml
+- name: Bridge contract
+  run: node tests/native-bridge.test.js
+```
+
+That compares the `@JavascriptInterface` methods in `MedhaBridge.kt` against
+what `transport.js` actually calls — names, parameter counts, and the trailing
+`callId` the async protocol depends on. A grep could only prove a string
+appeared in a file; this catches a rename, a dropped parameter, or a resolve
+posted from the wrong thread, each of which compiles and builds cleanly and
+fails only on a real device.
+
+`.github/workflows/apk.yml` in this release already runs it, and separately
+verifies the built APK actually contains `assets/web/index.html` — an empty
+assets directory produces an app that installs, opens, and shows a blank screen.
+
 `tests/shell.test.js` now names any file in `tests/` that this release does not
 ship, so the message says *delete this* rather than *fix this*.
 

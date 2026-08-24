@@ -88,6 +88,7 @@ tests/boot.test.js
 tests/e2e.test.js
 tests/learning.test.js
 tests/model.test.js
+tests/native-bridge.test.js
 tests/organizer.test.js
 tests/parser.test.js
 tests/pipeline.test.js

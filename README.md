@@ -176,15 +176,16 @@ CI fails if leftovers are present or if the manifest is stale. See
 
 ```bash
 npm run check                 # lint + typecheck + all JS suites (what CI runs)
-npm test                      # 832 assertions across 13 suites
+npm test                      # 871 assertions across 14 suites
 python3 tests/server_test.py  # 34 assertions — proxy, limiter, headers
 python3 tools/redact.py --selftest
 ```
 
 ```
 ✓ analytics · parser · organizer · model · transport · learning
-✓ pipeline · realcorpus · shell · boot · e2e · provenance · redact
-13 suites · 832 passed · 0 failed        (+ 40 Python)
+✓ pipeline · realcorpus · shell · native-bridge · boot · e2e
+✓ provenance · redact
+14 suites · 871 passed · 0 failed        (+ 40 Python)
 ```
 
 Each suite is a plain script that counts assertions and exits non-zero, so any
@@ -206,6 +207,12 @@ Four of these check things no unit test can see:
   are gone and specific structure survives.
 - **`provenance.test.js`** holds a floor on how much of each message can be
   traced, so a bank format change cannot quietly switch the feature off.
+- **`native-bridge.test.js`** compares the `@JavascriptInterface` methods in
+  `MedhaBridge.kt` against what `transport.js` calls — names, arity, and the
+  trailing `callId` the async protocol needs. The two halves are connected only
+  by string name at runtime, so a rename compiles, builds, installs, launches,
+  and then one screen silently does nothing. Needs no Android SDK; it reads
+  source. Skips when the Android project is absent.
 - **`e2e.test.js`** starts `app.py` itself, drives the real ingest pipeline over
   HTTP through the real proxy, and checks the totals that come out. It skips
   loudly (exit 0) when the Python deps are absent rather than failing a JS run
@@ -435,7 +442,7 @@ static/js/ui/
   views/                      overview, dashboard, daily, detail, transactions,
                               bills, inbox, ask, setup
 
-tests/                      13 JS suites (832) + server_test.py (40)
+tests/                      14 JS suites (871) + server_test.py (40)
 tools/redact.py             the same redaction, offline, for bulk corpus files
 tools/bump_version.py       moves all five version constants together
 tools/prune_stale.py        removes files an upgrade could not delete

@@ -55,6 +55,12 @@ jobs:
       - name: Web app must pass before it is bundled
         run: npm test
 
+      # The two halves of the bridge are connected only by string name at
+      # runtime. A renamed Kotlin method compiles, builds, installs and
+      # launches, and then one screen silently does nothing.
+      - name: Bridge contract
+        run: node tests/native-bridge.test.js
+
       - run: chmod +x gradlew
 
       - name: Assemble
