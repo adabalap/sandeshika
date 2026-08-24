@@ -166,9 +166,36 @@ ok('the page cannot override the Authorization header',
   /equals\("Authorization", ignoreCase = true\)/.test(kotlin),
   'header passthrough must skip Authorization');
 
-ok('ProGuard keeps the bridge methods',
-  read(path.join(ROOT, 'app/proguard-rules.pro')).includes('JavascriptInterface'),
-  'R8 sees no Kotlin callers, strips them, and only the RELEASE build breaks');
+{
+  const rules = read(path.join(ROOT, 'app/proguard-rules.pro'));
+
+  ok('ProGuard keeps the bridge methods', rules.includes('JavascriptInterface'),
+    'R8 sees no Kotlin callers, strips them, and only the RELEASE build breaks');
+  ok('the bridge class itself is kept', /-keep class .*MedhaBridge/.test(rules));
+
+  /*
+   * R8 refuses to finish when a referenced class is missing, and Tink — pulled
+   * in by androidx.security:security-crypto, which stores the Medha token — is
+   * annotated with Error Prone and JSR-305 types that exist only at compile
+   * time. Without these the release build fails with a wall of
+   * "Missing class com.google.errorprone.annotations.*". It only ever affects
+   * the minified build, so nothing before this step catches it.
+   */
+  for (const pkg of ['com.google.errorprone.annotations', 'javax.annotation']) {
+    ok(`R8 is told ${pkg}.* is absent on purpose`,
+      rules.includes(`-dontwarn ${pkg}.`),
+      'compile-time-only annotations; R8 halts on the missing references');
+  }
+
+  // Tink resolves key managers reflectively from the keyset, so they have no
+  // static callers. Losing one means EncryptedSharedPreferences throws the
+  // first time the token is saved.
+  ok('Tink classes are kept for reflective key-manager lookup',
+    /-keep class com\.google\.crypto\.tink\./.test(rules));
+
+  // A stack trace from a user's device is worth having.
+  ok('line numbers survive minification', rules.includes('LineNumberTable'));
+}
 
 // ---------------------------------------------------------------------------
 // 5. The bundled asset path the APK actually loads

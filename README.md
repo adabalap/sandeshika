@@ -179,7 +179,7 @@ suite that reports red for a correct codebase is a suite people stop believing.
 
 ```bash
 npm run check                 # lint + typecheck + all JS suites (what CI runs)
-npm test                      # 871 assertions across 14 suites
+npm test                      # 875 assertions across 14 suites
 python3 tests/server_test.py  # 34 assertions — proxy, limiter, headers
 python3 tools/redact.py --selftest
 ```
@@ -188,7 +188,7 @@ python3 tools/redact.py --selftest
 ✓ analytics · parser · organizer · model · transport · learning
 ✓ pipeline · realcorpus · shell · native-bridge · boot · e2e
 ✓ provenance · redact
-14 suites · 871 passed · 0 failed        (+ 40 Python)
+14 suites · 875 passed · 0 failed        (+ 40 Python)
 ```
 
 Each suite is a plain script that counts assertions and exits non-zero, so any
@@ -401,6 +401,7 @@ what it does with it. `INTERNET` is the only permission declared, and
 | Cleartext limited to loopback | Medha is plain HTTP on 127.0.0.1; everything else is denied outright |
 | Backups disabled | a financial history and that token do not belong in a cloud backup |
 | ProGuard keeps the bridge | R8 sees no Kotlin callers, strips the methods, and only the *release* build breaks |
+| `-dontwarn` for Tink's annotations | `security-crypto` pulls in Tink, whose Error Prone and JSR-305 annotations exist only at compile time; R8 halts on the missing references |
 
 ## Layout
 
@@ -445,7 +446,7 @@ static/js/ui/
   views/                      overview, dashboard, daily, detail, transactions,
                               bills, inbox, ask, setup
 
-tests/                      14 JS suites (871) + server_test.py (40)
+tests/                      14 JS suites (875) + server_test.py (40)
 tools/redact.py             the same redaction, offline, for bulk corpus files
 tools/bump_version.py       moves all five version constants together
 tools/prune_stale.py        removes files an upgrade could not delete
