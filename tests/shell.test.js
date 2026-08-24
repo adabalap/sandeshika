@@ -204,28 +204,44 @@ ok('every element id the UI writes to exists in index.html', dangling.length ===
 
   ok('tests/ contains test files', testFiles.length > 0);
 
-  /*
-   * Files this release ships. Extracting a release archive over a working tree
-   * adds and overwrites but NEVER deletes, so a suite removed upstream survives
-   * in the checkout and keeps failing — with an error about its contents rather
-   * than about the fact that it should no longer exist.
-   *
-   * Naming the expected set turns "fix this file" into "delete this file",
-   * which is the actual remedy.
-   */
-  const SHIPPED = new Set([
-    'analytics.test.js', 'boot.test.js', 'e2e.test.js', 'learning.test.js',
-    'model.test.js', 'organizer.test.js', 'parser.test.js', 'pipeline.test.js',
-    'provenance.test.js', 'realcorpus.test.js', 'redact.test.js',
-    'shell.test.js', 'transport.test.js', 'run.js',
-  ]);
+  /** @type {Set<string>} filled from MANIFEST.txt below. */
+  let SHIPPED_FILES = new Set();
 
-  const strays = testFiles.filter((f) => !SHIPPED.has(f));
-  ok('tests/ contains no files left over from an earlier release',
-    strays.length === 0,
-    `${strays.join(', ')}\n     `
-    + 'These are not part of this release. If they came from an older version, '
-    + 'delete them (git rm tests/<name>). If one is yours, add it to SHIPPED here.');
+  /*
+   * Which files this release ships, read from MANIFEST.txt.
+   *
+   * Derived, not hand-written. A duplicated list in this file would be one more
+   * thing to remember on every release, and the failure mode of forgetting is a
+   * test that rejects a brand-new suite as a leftover — which teaches people to
+   * edit the list until the check stops complaining.
+   *
+   * Extracting a release archive over a working tree adds and overwrites but
+   * NEVER deletes, so a suite removed upstream survives locally and fails with
+   * an error about its contents rather than about no longer belonging.
+   */
+  const manifestPath = path.join(ROOT, 'MANIFEST.txt');
+  ok('MANIFEST.txt ships with the release', fs.existsSync(manifestPath),
+    'without it, prune_stale.py cannot tell a leftover from something you added');
+
+  if (fs.existsSync(manifestPath)) {
+    const shipped = new Set(read(manifestPath)
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l && !l.startsWith('#')));
+
+    ok('the manifest covers tests/', [...shipped].some((f) => f.startsWith('tests/')));
+
+    const strays = testFiles.filter((f) => !shipped.has(`tests/${f}`));
+    ok('tests/ contains no files left over from an earlier release',
+      strays.length === 0,
+      `${strays.join(', ')}\n     `
+      + 'Not part of this release. Remove them with:\n     '
+      + '  python3 tools/prune_stale.py --apply\n     '
+      + 'If one is yours, keep it outside tests/ or regenerate the manifest '
+      + '(python3 tools/make_manifest.py).');
+
+    SHIPPED_FILES = shipped;
+  }
 
   for (const f of testFiles) {
     // This file names the very patterns it forbids, in its own regexes and
@@ -233,9 +249,9 @@ ok('every element id the UI writes to exists in index.html', dangling.length ===
     // narrowing the patterns until they miss their own source would weaken
     // them for every other file.
     if (f === 'shell.test.js') continue;
-    // Already reported above as a leftover; auditing its contents would bury
-    // the useful message under an irrelevant one.
-    if (!SHIPPED.has(f)) continue;
+    // Already reported above as a leftover; auditing its contents too would
+    // bury the useful message under an irrelevant one.
+    if (SHIPPED_FILES.size && !SHIPPED_FILES.has(`tests/${f}`)) continue;
 
     /*
      * Comments are stripped before scanning. A file that explains in prose why

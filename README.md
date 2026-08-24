@@ -155,16 +155,28 @@ stays clean of the permission.
 
 ## Upgrading
 
-Extracting a release over a working tree **never deletes** files removed
-upstream, so a suite deleted in a new version survives locally and fails with a
-confusing error. See [UPGRADING.md](UPGRADING.md) — `tests/shell.test.js` now
-names leftovers explicitly.
+Extracting a release over a working tree adds and overwrites but **never
+deletes**, so a file removed upstream survives locally and fails with an error
+about its contents rather than about no longer belonging.
+
+`MANIFEST.txt` ships with the release and lists every file in it, which is what
+lets the upgrade express a deletion:
+
+```bash
+unzip -o sandeshika-v2.1.0.zip
+npm run prune          # lists leftovers — dry run, changes nothing
+npm run prune:apply    # removes them (git rm when tracked)
+npm test
+```
+
+CI fails if leftovers are present or if the manifest is stale. See
+[UPGRADING.md](UPGRADING.md).
 
 ## Tests
 
 ```bash
 npm run check                 # lint + typecheck + all JS suites (what CI runs)
-npm test                      # 829 assertions across 13 suites
+npm test                      # 832 assertions across 13 suites
 python3 tests/server_test.py  # 34 assertions — proxy, limiter, headers
 python3 tools/redact.py --selftest
 ```
@@ -172,7 +184,7 @@ python3 tools/redact.py --selftest
 ```
 ✓ analytics · parser · organizer · model · transport · learning
 ✓ pipeline · realcorpus · shell · boot · e2e · provenance · redact
-13 suites · 829 passed · 0 failed        (+ 40 Python)
+13 suites · 832 passed · 0 failed        (+ 40 Python)
 ```
 
 Each suite is a plain script that counts assertions and exits non-zero, so any
@@ -423,9 +435,12 @@ static/js/ui/
   views/                      overview, dashboard, daily, detail, transactions,
                               bills, inbox, ask, setup
 
-tests/                      13 JS suites (829) + server_test.py (40)
+tests/                      13 JS suites (832) + server_test.py (40)
 tools/redact.py             the same redaction, offline, for bulk corpus files
-tools/bump_version.py       moves all four version constants together
+tools/bump_version.py       moves all five version constants together
+tools/prune_stale.py        removes files an upgrade could not delete
+tools/make_manifest.py      regenerates MANIFEST.txt
+MANIFEST.txt                every file in this release
 ```
 
 Data lives in Medha's `/store` under this client's namespace, not IndexedDB —

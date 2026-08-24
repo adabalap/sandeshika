@@ -16,19 +16,31 @@ this already:
 `tests/shell.test.js` now names any file in `tests/` that this release does not
 ship, so the message says *delete this* rather than *fix this*.
 
-## Clean upgrade
+## Upgrading
 
 ```bash
-# From the repository root, with a clean git status.
-rm -rf static tests tools app .github/workflows/ci.yml .github/workflows/apk.yml
-unzip -o sandeshika-v2.1.0.zip
+unzip -o sandeshika-v2.1.0.zip     # adds and overwrites
+npm run prune                      # lists anything left over — changes nothing
+npm run prune:apply                # removes it (git rm when tracked)
 npm install && npm test
-git status          # review deletions before committing
+git status                         # review the deletions before committing
 ```
 
-Removing those directories first is what makes the upgrade a replacement rather
-than a merge. Anything of your own that lives inside them should be moved out or
-committed first — `git status` after the unzip shows exactly what changed.
+`MANIFEST.txt` ships with the release and lists every file in it. That is what
+lets `prune` tell a leftover from something you added — an archive on its own
+has no way to say *and delete that*.
+
+Only these directories are reconciled:
+
+    static/  tests/  tools/  app/src/  .github/workflows/
+
+The repository root is deliberately **not** managed, because that is where
+`settings.json`, keystores and `local.properties` live. `prune` is a dry run by
+default; a tool that deletes on an accidental invocation is worse than the
+problem it solves.
+
+If a file it flags is genuinely yours, either keep it outside those directories
+or run `npm run manifest` to fold it in.
 
 ## Files that are yours, not the release's
 

@@ -42,6 +42,23 @@ jobs:
       - run: ruff check app.py tools/ tests/server_test.py
       - run: python3 tests/server_test.py
 
+      # A checkout upgraded by extracting an archive keeps every file the new
+      # version deleted. Those files still get picked up by the test glob and
+      # fail with an error about their contents rather than about no longer
+      # belonging.
+      - name: No files left over from an earlier release
+        run: python3 tools/prune_stale.py
+
+      # The manifest is generated, so a release built without regenerating it
+      # would prune files that are meant to be there.
+      - name: MANIFEST.txt is current
+        run: |
+          cp MANIFEST.txt /tmp/manifest.before
+          python3 tools/make_manifest.py
+          diff -u /tmp/manifest.before MANIFEST.txt || {
+            echo "::error::MANIFEST.txt is stale — run: python3 tools/make_manifest.py"
+            exit 1; }
+
       # The redactor exists in two places: redact.py for bulk corpus files and
       # core/redact.js for the in-app share button. Its own self-test runs here
       # so the offline tool cannot rot while the in-app one is maintained.
