@@ -239,5 +239,92 @@ class TestConfigSnapshot(unittest.TestCase):
         self.assertEqual((url, tok), ("http://127.0.0.1:1", "tok1"))
 
 
+class TestAndroidResources(unittest.TestCase):
+    """
+    The Android resources are XML, and Gradle only validates them on a machine
+    with the SDK installed — which the Python CI job is not. These checks are
+    nearly free and catch the class of mistake that otherwise surfaces as a
+    build failure minutes into an APK job.
+    """
+
+    ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    RES = os.path.join(ROOT, "app", "src", "main")
+
+    @classmethod
+    def setUpClass(cls):
+        if not os.path.isdir(cls.RES):
+            raise unittest.SkipTest("no Android project in this checkout")
+
+    def _xml_files(self):
+        import glob
+        return glob.glob(os.path.join(self.RES, "**", "*.xml"), recursive=True)
+
+    def test_every_resource_is_well_formed(self):
+        import xml.etree.ElementTree as ET
+        files = self._xml_files()
+        self.assertGreater(len(files), 5, "expected a full set of Android resources")
+        for f in files:
+            with self.subTest(file=os.path.relpath(f, self.ROOT)):
+                # A double hyphen inside an XML comment is illegal, and writing
+                # a CSS custom property name such as "--brand" in a comment is
+                # exactly how that happens.
+                ET.parse(f)
+
+    def _declared_permissions(self):
+        """
+        Parsed, not grepped.
+
+        A substring search hit the word READ_SMS inside the manifest's own
+        comment explaining why READ_SMS is absent — the test failing on the
+        documentation of the thing it was verifying. Reading the actual
+        elements is both correct and immune to how the file is commented.
+        """
+        import xml.etree.ElementTree as ET
+        ns = "{http://schemas.android.com/apk/res/android}"
+        root = ET.parse(os.path.join(self.RES, "AndroidManifest.xml")).getroot()
+        return {e.get(ns + "name") for e in root.findall("uses-permission")}
+
+    def test_manifest_declares_no_sms_permission(self):
+        perms = self._declared_permissions()
+        # Sandeshika asks Medha for messages over loopback; Medha is the app
+        # that holds the permission and shows the user what it does with it.
+        # If an SMS permission ever appears here, the separation that makes the
+        # design defensible has been lost.
+        self.assertNotIn("android.permission.READ_SMS", perms)
+        self.assertNotIn("android.permission.RECEIVE_SMS", perms)
+        self.assertIn("android.permission.INTERNET", perms)
+
+    def test_internet_is_the_only_permission(self):
+        # Anything new here should be a deliberate decision, not something a
+        # library's manifest merged in unnoticed.
+        self.assertEqual(self._declared_permissions(), {"android.permission.INTERNET"})
+
+    def test_cleartext_is_limited_to_loopback(self):
+        cfg = os.path.join(self.RES, "res", "xml", "network_security_config.xml")
+        with open(cfg, encoding="utf-8") as fh:
+            text = fh.read()
+        self.assertIn('cleartextTrafficPermitted="false"', text)
+        self.assertIn("127.0.0.1", text)
+
+    def test_backups_are_disabled(self):
+        import xml.etree.ElementTree as ET
+        ns = "{http://schemas.android.com/apk/res/android}"
+        root = ET.parse(os.path.join(self.RES, "AndroidManifest.xml")).getroot()
+        app_el = root.find("application")
+        # The stored data is a financial history plus a token that can read
+        # every SMS on the phone. Neither belongs in a cloud backup.
+        self.assertEqual(app_el.get(ns + "allowBackup"), "false")
+        self.assertEqual(app_el.get(ns + "networkSecurityConfig"), "@xml/network_security_config")
+
+    def test_proguard_keeps_the_javascript_bridge(self):
+        rules = os.path.join(self.ROOT, "app", "proguard-rules.pro")
+        with open(rules, encoding="utf-8") as fh:
+            text = fh.read()
+        # R8 sees no Kotlin callers for the bridge methods and strips them, so
+        # the release build fails at runtime while debug works perfectly.
+        self.assertIn("MedhaBridge", text)
+        self.assertIn("JavascriptInterface", text)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

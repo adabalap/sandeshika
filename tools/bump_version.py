@@ -6,7 +6,7 @@ A service worker keyed to a stale cache name serves old code forever, and the
 symptom is invisible from inside the app: the repo looks right, the phone runs
 something else, and the days that costs are the reason this script exists.
 
-FOUR files have to move together now. The previous version of this script still
+FIVE files have to move together now. The previous version of this script still
 pointed at static/js/app.js, which was split into modules in 2.0.0, and did not
 know about package.json at all — so it printed a warning nobody read and left
 the build half-bumped. tests/shell.test.js fails when the four disagree, which
@@ -33,6 +33,8 @@ EDITS = [
     ("static/sw.js",       r"const VERSION = '[^']+';", f"const VERSION = '{version}';"),
     ("static/js/main.js",  r"const BUILD = '[^']+';",   f"const BUILD = '{version}';"),
     ("app.py",             r'APP_VERSION = "[^"]+"',    f'APP_VERSION = "{version}"'),
+    ("app/build.gradle.kts", r'val appVersionName = "[^"]+"',
+     f'val appVersionName = "{version}"'),
 ]
 
 failed = []
@@ -66,4 +68,20 @@ if pkg["version"] != version:
     print(f"\nFAILED — package.json reads {pkg['version']} after the write.")
     sys.exit(1)
 
-print(f"\nAll four now read {version}. Run `npm test` to confirm.")
+# versionCode must increase monotonically or Android refuses the upgrade. It is
+# derived from the name so it can never disagree with it: 2.1.0 -> 20100.
+major, minor, patch = (int(x) for x in version.split("."))
+code = major * 10000 + minor * 100 + patch
+gradle_path = os.path.join(root, "app/build.gradle.kts")
+if os.path.exists(gradle_path):
+    with open(gradle_path, encoding="utf-8") as fh:
+        g = fh.read()
+    g, n = re.subn(r"val appVersionCode = \d+", f"val appVersionCode = {code}", g, count=1)
+    if not n:
+        print("\nFAILED — app/build.gradle.kts has no appVersionCode to update.")
+        sys.exit(1)
+    with open(gradle_path, "w", encoding="utf-8") as fh:
+        fh.write(g)
+    print(f"  app/build.gradle.kts versionCode -> {code}")
+
+print(f"\nAll five now read {version}. Run `npm test` to confirm.")

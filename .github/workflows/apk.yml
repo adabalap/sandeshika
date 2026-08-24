@@ -1,0 +1,89 @@
+name: APK
+
+# Builds the Android wrapper. The web app is NOT duplicated into the Android
+# project — app/build.gradle.kts syncs static/ into assets at build time, which
+# is why this project has to sit at the same repository root as static/ and
+# app.py rather than in a subfolder of its own.
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Fails here, with a readable message, rather than 200 lines into a
+      # Gradle stack trace.
+      - name: Check the repository layout
+        run: |
+          set -euo pipefail
+          missing=""
+          for f in settings.gradle.kts app/build.gradle.kts gradlew static/index.html; do
+            [ -e "$f" ] || missing="$missing $f"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing at the repository root:$missing"
+            echo "The Android project and the web app share one root:"
+            echo "  settings.gradle.kts  app/  gradlew  static/  app.py"
+            echo "If a release archive was extracted into a subfolder, move its contents up."
+            exit 1
+          fi
+          echo "Layout OK."
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # The APK bundles the web app, so shipping one whose tests fail would
+      # ship a broken interface inside a correctly-built container.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: npm install --no-audit --no-fund
+      - name: Web app must pass before it is bundled
+        run: npm test
+
+      - run: chmod +x gradlew
+
+      - name: Assemble
+        run: ./gradlew --no-daemon assembleFullRelease assembleCoreRelease
+        env:
+          SANDESHIKA_KEYSTORE: ${{ secrets.SANDESHIKA_KEYSTORE_PATH }}
+          SANDESHIKA_KEYSTORE_PASSWORD: ${{ secrets.SANDESHIKA_KEYSTORE_PASSWORD }}
+          SANDESHIKA_KEY_ALIAS: ${{ secrets.SANDESHIKA_KEY_ALIAS }}
+          SANDESHIKA_KEY_PASSWORD: ${{ secrets.SANDESHIKA_KEY_PASSWORD }}
+
+      # A silently empty assets/ directory produces an APK that installs, opens
+      # and shows a blank screen — the failure that is hardest to diagnose from
+      # a user's report.
+      - name: The APK must actually contain the web app
+        run: |
+          set -euo pipefail
+          apk=$(find app/build/outputs/apk -name '*full-release*.apk' | head -1)
+          echo "Inspecting $apk"
+          unzip -l "$apk" | grep -q 'assets/web/index.html' || {
+            echo "::error::index.html is not in the APK — the assets sync did not run."; exit 1; }
+          unzip -l "$apk" | grep -q 'assets/web/js/main.js' || {
+            echo "::error::main.js is not in the APK."; exit 1; }
+          count=$(unzip -l "$apk" | grep -c 'assets/web/js/.*\.js' || true)
+          echo "$count JavaScript modules bundled"
+          # 25 modules reachable from main.js, per tests/shell.test.js.
+          [ "$count" -ge 25 ] || { echo "::error::only $count modules bundled, expected 25+"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sandeshika-apk
+          path: app/build/outputs/apk/**/*.apk
+          if-no-files-found: error

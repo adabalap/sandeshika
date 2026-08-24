@@ -157,7 +157,7 @@ stays clean of the permission.
 
 ```bash
 npm run check                 # lint + typecheck + all JS suites (what CI runs)
-npm test                      # 817 assertions across 13 suites
+npm test                      # 829 assertions across 13 suites
 python3 tests/server_test.py  # 34 assertions — proxy, limiter, headers
 python3 tools/redact.py --selftest
 ```
@@ -165,7 +165,7 @@ python3 tools/redact.py --selftest
 ```
 ✓ analytics · parser · organizer · model · transport · learning
 ✓ pipeline · realcorpus · shell · boot · e2e · provenance · redact
-13 suites · 817 passed · 0 failed
+13 suites · 829 passed · 0 failed        (+ 40 Python)
 ```
 
 Each suite is a plain script that counts assertions and exits non-zero, so any
@@ -336,9 +336,50 @@ Each produces a confident, plausible, wrong number — invisible in a demo.
 - **`strictNullChecks` found `[txn.softKey]` could put `undefined` into the
   dedup set**, after which every keyless transaction matched the first.
 
+## The Android wrapper
+
+The APK exists so the app runs on the phone with no laptop and no Flask server.
+It is a WebView hosting the *same* `static/` directory the browser build serves
+— copied into assets by Gradle at build time, never duplicated into the Android
+project, because two copies of a front end drift apart within a week and the
+divergence only shows up as a bug that reproduces on the phone and nowhere else.
+
+**The Android project and the web app share one repository root.** That is a
+requirement, not a preference: `app/build.gradle.kts` reads `../static`, and
+fails with an explanatory message if it is not there.
+
+```
+settings.gradle.kts  app/  gradlew  gradle/     ← Android
+static/  app.py  tests/  tools/                 ← the web app
+```
+
+```bash
+./gradlew assembleFullRelease     # the build that reads an inbox
+./gradlew assembleCoreRelease     # no SMS features; installs anywhere
+```
+
+**Sandeshika never holds `READ_SMS`.** It asks Medha for messages over
+loopback, and Medha is the app that holds the permission and shows the user
+what it does with it. `INTERNET` is the only permission declared, and
+`server_test.py` parses the manifest to keep it that way.
+
+| Decision | Why |
+|---|---|
+| `WebViewAssetLoader` over `file://` | a `file://` page is an opaque origin — no service worker, no secure context — and the usual workaround hands page script the device filesystem |
+| Async bridge methods | a `@JavascriptInterface` call blocks the JS thread; a cold model load takes minutes, so a synchronous bridge would freeze the UI and end in an ANR |
+| Token in `EncryptedSharedPreferences` | it is a bearer credential for an API that can read every SMS; the page never sees it, and the page renders SMS-derived text |
+| Allowlist enforced in Kotlin | there is no Flask proxy inside the APK to enforce it, and without it the bridge is an open proxy onto Medha |
+| Cleartext limited to loopback | Medha is plain HTTP on 127.0.0.1; everything else is denied outright |
+| Backups disabled | a financial history and that token do not belong in a cloud backup |
+| ProGuard keeps the bridge | R8 sees no Kotlin callers, strips the methods, and only the *release* build breaks |
+
 ## Layout
 
 ```
+settings.gradle.kts         Android — shares the repository root with the web app
+app/                        WebView host, bridge, encrypted settings
+gradlew  gradle/            Gradle 8.7 wrapper
+
 app.py                      waitress host + allowlisted proxy + settings + mock Medha
 settings.json               saved token and Medha URL, mode 0600, gitignored
 package.json                scripts: check / test / lint / typecheck
@@ -375,7 +416,7 @@ static/js/ui/
   views/                      overview, dashboard, daily, detail, transactions,
                               bills, inbox, ask, setup
 
-tests/                      13 JS suites (817) + server_test.py (34)
+tests/                      13 JS suites (829) + server_test.py (40)
 tools/redact.py             the same redaction, offline, for bulk corpus files
 tools/bump_version.py       moves all four version constants together
 ```

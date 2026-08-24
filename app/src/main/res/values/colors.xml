@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Taken from the brand-900 token in static/app.css; the app bar's
+         gradient starts on this colour, so the status bar continues it. -->
+    <color name="brand">#2C2166</color>
+    <!-- The bg token, light theme. The dark value is in values-night. -->
+    <color name="window_bg">#F5F6FA</color>
+</resources>

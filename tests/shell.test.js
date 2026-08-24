@@ -141,6 +141,23 @@ eq('main.js BUILD matches package.json', mainBuild, pkg.version);
 eq('sw.js VERSION matches package.json', swVersion, pkg.version);
 eq('app.py APP_VERSION matches package.json', pyVersion, pkg.version);
 
+// The Android wrapper is the fifth place this number lives. When it drifts the
+// running app tells the user their cache is stale — a warning that is then
+// wrong for everyone and quickly learned to be ignored.
+const gradlePath = path.join(ROOT, 'app', 'build.gradle.kts');
+if (fs.existsSync(gradlePath)) {
+  const gradle = read(gradlePath);
+  const gradleVersion = (gradle.match(/val appVersionName = "([^"]+)"/) || [])[1];
+  const gradleCode = Number((gradle.match(/val appVersionCode = (\d+)/) || [])[1]);
+  eq('app/build.gradle.kts versionName matches package.json', gradleVersion, pkg.version);
+
+  // versionCode must rise monotonically or Android refuses the upgrade, so it
+  // is derived from the name rather than maintained by hand.
+  const [maj, min, pat] = pkg.version.split('.').map(Number);
+  eq('the Android versionCode is derived from the version name',
+    gradleCode, maj * 10000 + min * 100 + pat);
+}
+
 // ---------------------------------------------------------------------------
 // Every element the UI writes to actually exists
 //

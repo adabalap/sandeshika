@@ -33,21 +33,126 @@
  * The Android bridge, when present. Methods are `@JavascriptInterface` calls,
  * which return synchronously as JSON strings.
  * @typedef {object} AndroidBridge
- * @property {() => string} getConfig
- * @property {(url: string, token: string) => string} saveSettings
- * @property {() => string} clearSettings
- * @property {(method: string, path: string, body: string|null, headers: string) => string} request
- * @property {() => string} detect
+ * @property {() => string} getConfig                Instant: reads local preferences.
+ * @property {() => string} clearSettings            Instant: clears local preferences.
+ * @property {(method: string, path: string, body: string|null, headers: string, callId: string) => void} [requestAsync]
+ * @property {(url: string, token: string, callId: string) => void} [saveSettingsAsync]
+ * @property {(callId: string) => void} [detectAsync]
+ * @property {(method: string, path: string, body: string|null, headers: string) => string} [request]      Legacy, blocking.
+ * @property {(url: string, token: string) => string} [saveSettings]                                        Legacy, blocking.
+ * @property {() => string} [detect]                                                                        Legacy, blocking.
  */
 
+/**
+ * What a usable bridge must provide.
+ *
+ * getConfig and clearSettings read local preferences and return instantly, so
+ * they are synchronous. Everything that touches the network has an *Async
+ * variant, because a @JavascriptInterface call BLOCKS the JavaScript thread
+ * until Kotlin returns — and a cold model load on the phone takes minutes. A
+ * synchronous bridge would freeze the entire interface for the duration, with
+ * no scrolling and no cancel button, and end in an ANR.
+ */
 const BRIDGE_METHODS = /** @type {const} */ (
-  ['getConfig', 'saveSettings', 'clearSettings', 'request', 'detect']
+  ['getConfig', 'clearSettings', 'requestAsync', 'saveSettingsAsync', 'detectAsync']
 );
 
-/** @returns {AndroidBridge|null} */
+/*
+ * Async bridge plumbing.
+ *
+ * Kotlin cannot hand a Promise back across the JNI boundary, so the call is
+ * given an id, returns immediately, and the native side later invokes
+ * window.__medhaResolve(id, json) on the UI thread.
+ */
+/** @type {Map<string, {resolve: (v: any) => void, reject: (e: Error) => void, timer: any}>} */
+const pending = new Map();
+let callSeq = 0;
+
+/** Installed once, on the first async call. */
+function installResolver() {
+  if (/** @type {any} */ (globalThis).__medhaResolve) return;
+  /** @type {any} */ (globalThis).__medhaResolve = (callId, json) => {
+    const entry = pending.get(callId);
+    if (!entry) return; // already timed out, or a late duplicate
+    pending.delete(callId);
+    clearTimeout(entry.timer);
+    try {
+      entry.resolve(json == null || json === '' ? {} : JSON.parse(String(json)));
+    } catch {
+      entry.reject(new Error('The Android bridge returned something unreadable.'));
+    }
+  };
+}
+
+/**
+ * Calls an async bridge method and waits for the native resolve.
+ * @param {string} method
+ * @param {unknown[]} args
+ * @param {number} ms
+ */
+function bridgeCall(method, args, ms) {
+  installResolver();
+  const b = /** @type {any} */ (globalThis).AndroidMedha;
+  const callId = `c${++callSeq}_${Date.now().toString(36)}`;
+
+  return new Promise((resolve, reject) => {
+    // A native side that dies mid-call would otherwise leave this pending
+    // forever, with the UI stuck on a spinner and no way back.
+    const timer = setTimeout(() => {
+      pending.delete(callId);
+      const e = /** @type {Error & {status?: number}} */ (
+        new Error(`No response from Medha after ${Math.round(ms / 1000)}s.`));
+      e.status = 504;
+      reject(e);
+    }, ms);
+
+    pending.set(callId, { resolve, reject, timer });
+
+    try {
+      b[method](...args, callId);
+    } catch (e) {
+      pending.delete(callId);
+      clearTimeout(timer);
+      reject(/** @type {Error} */ (e));
+    }
+  });
+}
+
+/**
+ * Fetches a legacy blocking method, failing with a message that names the
+ * cause. A bridge missing both generations of a method means the APK and its
+ * bundled web assets have drifted out of step, and the symptom otherwise is
+ * one screen quietly not working.
+ * @param {any} b
+ * @param {'request'|'saveSettings'|'detect'} name
+ * @returns {(...args: any[]) => string}
+ */
+function legacy(b, name) {
+  const fn = b && b[name];
+  if (typeof fn !== 'function') {
+    throw new Error(`This app's bridge provides neither ${name} nor ${name}Async. `
+      + 'The APK and its web assets are out of step — reinstall the app.');
+  }
+  return fn.bind(b);
+}
+
+/** True when the bridge exposes the non-blocking variants. */
+const hasAsync = () => {
+  const b = /** @type {any} */ (globalThis).AndroidMedha;
+  return Boolean(b && typeof b.requestAsync === 'function');
+};
+
+/**
+ * @returns {AndroidBridge|null}
+ *
+ * Either generation counts. Gating on `request` alone meant an async-only
+ * bridge — the one the current APK ships — was not detected at all, and every
+ * call fell through to fetch() against an origin with no server behind it.
+ */
 function bridge() {
   const b = /** @type {any} */ (globalThis).AndroidMedha;
-  return b && typeof b.request === 'function' ? b : null;
+  if (!b) return null;
+  return (typeof b.requestAsync === 'function' || typeof b.request === 'function') ? b : null;
 }
 
 /**
@@ -170,7 +275,11 @@ export const Transport = {
   async saveSettings(medhaUrl, token) {
     const b = bridge();
     if (b) {
-      const r = await decode(b.saveSettings(medhaUrl, token), 'saveSettings');
+      // Saving verifies the token against a live Medha before persisting it,
+      // so it is a network call however local it looks.
+      const r = hasAsync()
+        ? await bridgeCall('saveSettingsAsync', [medhaUrl, token], 30000)
+        : await decode(legacy(b, 'saveSettings')(medhaUrl, token), 'saveSettings');
       if (r && r.error) throw new Error(r.error);
       return r;
     }
@@ -196,7 +305,12 @@ export const Transport = {
    */
   async detect() {
     const b = bridge();
-    if (b) return /** @type {any} */ (await decode(b.detect(), 'detect'));
+    if (b) {
+      // Six ports, each with its own probe timeout on the native side.
+      return hasAsync()
+        ? await bridgeCall('detectAsync', [], 45000)
+        : /** @type {any} */ (await decode(legacy(b, 'detect')(), 'detect'));
+    }
     // Six ports, each with its own probe timeout server-side.
     return unwrap(await fetchWithTimeout('/detect', {}, 45000));
   },
@@ -212,9 +326,12 @@ export const Transport = {
     const headers = { 'Content-Type': 'application/json', .../** @type {any} */ (opts.headers || {}) };
 
     if (b) {
-      const raw = b.request(method, path, /** @type {string|null} */ (opts.body ?? null),
-        JSON.stringify(headers));
-      const r = /** @type {any} */ (await decode(raw, 'request'));
+      const body = /** @type {string|null} */ (opts.body ?? null);
+      const r = hasAsync()
+        ? /** @type {any} */ (await bridgeCall(
+          'requestAsync', [method, path, body, JSON.stringify(headers)], timeoutFor(path)))
+        : /** @type {any} */ (await decode(
+          legacy(b, 'request')(method, path, body, JSON.stringify(headers)), 'request'));
       // The bridge reports HTTP failures in-band, since it cannot throw across
       // the JNI boundary. Re-raise them in the shape the rest of the app
       // already handles.

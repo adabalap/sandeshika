@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Telugu letter స (sa), the first letter of సందేశిక, on the brand gradient.
+  Drawn as a vector so it stays crisp at every density and adds no binary
+  assets to the repository.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group android:scaleX="0.62" android:scaleY="0.62"
+        android:translateX="20.5" android:translateY="20.5">
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M54,14 A40,40 0 1,0 54,94 A40,40 0 1,0 54,14 Z"
+            android:fillAlpha="0.14" />
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M38,36 L70,36 L70,46 L52,46 Q44,46 44,52 Q44,58 52,58 L62,58 Q74,58 74,70 Q74,82 62,82 L36,82 L36,72 L60,72 Q64,72 64,68 Q64,64 60,64 L50,64 Q34,64 34,50 Q34,36 38,36 Z" />
+    </group>
+</vector>

@@ -5,3 +5,11 @@ node_modules/
 
 # Contains your Medha API token in plaintext. Never commit it.
 settings.json
+
+# Android
+/build/
+/app/build/
+/.gradle/
+local.properties
+*.keystore
+*.jks
