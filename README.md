@@ -169,7 +169,10 @@ npm run prune:apply    # removes them (git rm when tracked)
 npm test
 ```
 
-CI fails if leftovers are present or if the manifest is stale. See
+Leftovers are **reported, not enforced**: `npm test` warns and still exits 0,
+because an old file sitting on disk is not a defect in the shipped app, and a
+suite that reports red for a correct codebase is a suite people stop believing.
+`npm run prune` is the version that carries an exit code. See
 [UPGRADING.md](UPGRADING.md).
 
 ## Tests

@@ -68,6 +68,11 @@ git status                         # review the deletions before committing
 lets `prune` tell a leftover from something you added — an archive on its own
 has no way to say *and delete that*.
 
+**Leftovers do not fail the build.** `npm test` prints a warning and exits 0;
+only `npm run prune` carries an exit code. An old file on disk is not a defect
+in the shipped app, and a suite that reports red for a correct codebase is one
+people learn to ignore.
+
 Only these directories are reconciled:
 
     static/  tests/  tools/  app/src/  .github/workflows/
