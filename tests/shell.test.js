@@ -170,6 +170,66 @@ ok('every element id the UI writes to exists in index.html', dangling.length ===
   dangling.map(([id, f]) => `#${id} (${f})`).join('\n     '));
 
 // ---------------------------------------------------------------------------
+// Every file under tests/ must be an ES module
+//
+// package.json sets "type": "module", which retroactively makes EVERY .js file
+// in the repository an ES module — including test files that were never
+// imported from main.js and so are invisible to the import walk above.
+//
+// A stray require() in one of them is not a failed assertion, it is a crash at
+// import time: the suite never runs, and if CI invokes the files individually
+// the run stops there and the suites after it are never reached. That is
+// exactly how a converted repo loses a test file without anyone noticing.
+// ---------------------------------------------------------------------------
+{
+  const testDir = path.join(ROOT, 'tests');
+  const testFiles = fs.readdirSync(testDir).filter((n) => n.endsWith('.js'));
+
+  ok('tests/ contains test files', testFiles.length > 0);
+
+  for (const f of testFiles) {
+    // This file names the very patterns it forbids, in its own regexes and
+    // comments, so it would fail its own check. Skipping it is the honest fix;
+    // narrowing the patterns until they miss their own source would weaken
+    // them for every other file.
+    if (f === 'shell.test.js') continue;
+
+    /*
+     * Comments are stripped before scanning. A file that explains in prose why
+     * it no longer uses __dirname was being failed for saying the word, which
+     * is the kind of false positive that gets a check deleted rather than
+     * fixed. Strings are left in: a require() built from one is still a bug.
+     */
+    const src = read(path.join(testDir, f))
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/(^|[^:])\/\/.*$/gm, '$1');
+
+    // Ignores `foo.require(` and `// require` prose; catches a bare call.
+    ok(`tests/${f} uses import, not require()`,
+      !/(^|[^.\w'"`])require\s*\(/m.test(src),
+      'CommonJS require() in a file package.json treats as an ES module — '
+      + "convert to `import x from 'node:fs'`");
+
+    ok(`tests/${f} does not use module.exports`,
+      !/\bmodule\.exports\b/.test(src),
+      'not defined in ESM — use `export` instead');
+
+    ok(`tests/${f} does not use __dirname or __filename`,
+      !/\b__(?:dirname|filename)\b/.test(src),
+      'not defined in ESM — use fileURLToPath(import.meta.url)');
+
+    // The 2.0 restructure moved every core module into core/ and split api.js
+    // into four. A path from the old layout resolves to nothing at runtime.
+    const stale = [...src.matchAll(/from\s+'(\.\.\/static\/js\/[^']+)'/g)]
+      .map((m) => m[1])
+      .filter((rel) => !fs.existsSync(path.resolve(testDir, rel)));
+    ok(`tests/${f} imports only modules that exist`, stale.length === 0,
+      `missing: ${stale.join(', ')} — core modules moved to static/js/core/ in 2.0.0, `
+      + 'and api.js split into data/{client,categories,ingest,transport}.js');
+  }
+}
+
+// ---------------------------------------------------------------------------
 // No module may reintroduce a window global as its interface
 // ---------------------------------------------------------------------------
 for (const file of reachable) {

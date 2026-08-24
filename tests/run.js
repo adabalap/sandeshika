@@ -18,7 +18,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 // test spends ten seconds confirming the same thing.
 const ORDER = [
   'format', 'analytics', 'parser', 'organizer', 'model',
-  'transport', 'learning', 'pipeline', 'realcorpus', 'shell', 'boot',
+  'transport', 'learning', 'pipeline', 'realcorpus', 'shell', 'boot', 'e2e',
 ];
 
 const files = fs.readdirSync(HERE)
@@ -47,13 +47,17 @@ for (const f of files) {
     continue;
   }
 
+  const skipped = /\(skipped\)/.test(out);
   const [, p, fl] = m;
   totalPass += Number(p);
   totalFail += Number(fl);
   const bad = Number(fl) > 0 || r.status !== 0;
-  process.stdout.write(
-    `${bad ? '✗' : '✓'} ${f.padEnd(24)} ${String(p).padStart(4)} passed  `
-    + `${Number(fl) ? `${fl} FAILED  ` : ''}${String(ms).padStart(5)}ms\n`);
+  // A skipped suite is reported as skipped, never as a silent pass. A suite
+  // that quietly reports zero of zero is how coverage disappears.
+  process.stdout.write(skipped
+    ? `− ${f.padEnd(24)} skipped (see its output for why)\n`
+    : `${bad ? '✗' : '✓'} ${f.padEnd(24)} ${String(p).padStart(4)} passed  `
+      + `${Number(fl) ? `${fl} FAILED  ` : ''}${String(ms).padStart(5)}ms\n`);
   if (bad) process.stdout.write(out.split('\n').filter((l) => l.trim()).slice(-12).join('\n') + '\n');
 }
 

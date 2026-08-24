@@ -157,15 +157,15 @@ stays clean of the permission.
 
 ```bash
 npm run check                 # lint + typecheck + all JS suites (what CI runs)
-npm test                      # 741 assertions across 12 suites
+npm test                      # 817 assertions across 13 suites
 python3 tests/server_test.py  # 34 assertions — proxy, limiter, headers
 python3 tools/redact.py --selftest
 ```
 
 ```
 ✓ analytics · parser · organizer · model · transport · learning
-✓ pipeline · realcorpus · shell · boot · provenance · redact
-12 suites · 741 passed · 0 failed
+✓ pipeline · realcorpus · shell · boot · e2e · provenance · redact
+13 suites · 817 passed · 0 failed
 ```
 
 Each suite is a plain script that counts assertions and exits non-zero, so any
@@ -187,6 +187,17 @@ Four of these check things no unit test can see:
   are gone and specific structure survives.
 - **`provenance.test.js`** holds a floor on how much of each message can be
   traced, so a bank format change cannot quietly switch the feature off.
+- **`e2e.test.js`** starts `app.py` itself, drives the real ingest pipeline over
+  HTTP through the real proxy, and checks the totals that come out. It skips
+  loudly (exit 0) when the Python deps are absent rather than failing a JS run
+  where nothing is broken.
+
+`shell.test.js` also scans **every** file in `tests/` for `require()`,
+`module.exports` and `__dirname`. `package.json` sets `"type": "module"`, which
+retroactively makes every `.js` in the repository an ES module — including test
+files nothing imports, which the module-graph walk cannot see. A stray
+`require()` there is a crash at import time, not a failed assertion: the suite
+never runs at all.
 
 ---
 
@@ -364,7 +375,7 @@ static/js/ui/
   views/                      overview, dashboard, daily, detail, transactions,
                               bills, inbox, ask, setup
 
-tests/                      12 JS suites (741) + server_test.py (34)
+tests/                      13 JS suites (817) + server_test.py (34)
 tools/redact.py             the same redaction, offline, for bulk corpus files
 tools/bump_version.py       moves all four version constants together
 ```

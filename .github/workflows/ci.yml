@@ -18,6 +18,13 @@ jobs:
         with:
           node-version: '22'
           cache: npm
+      # The e2e suite starts app.py itself. Without the Python deps it skips
+      # loudly rather than failing; installing them here means it actually runs.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+
       - run: npm install --no-audit --no-fund
       - run: npm run lint
       - run: npm run typecheck
