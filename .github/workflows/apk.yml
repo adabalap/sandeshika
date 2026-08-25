@@ -79,13 +79,27 @@ jobs:
           set -euo pipefail
           apk=$(find app/build/outputs/apk -name '*full-release*.apk' | head -1)
           echo "Inspecting $apk"
-          unzip -l "$apk" | grep -q 'assets/web/index.html' || {
-            echo "::error::index.html is not in the APK — the assets sync did not run."; exit 1; }
-          unzip -l "$apk" | grep -q 'assets/web/js/main.js' || {
-            echo "::error::main.js is not in the APK."; exit 1; }
-          count=$(unzip -l "$apk" | grep -c 'assets/web/js/.*\.js' || true)
+
+          # These paths mirror what app.py serves. An earlier version of this
+          # check asserted assets/web/... — the layout the app could not
+          # actually load — so it passed on a bundle that rendered unstyled
+          # HTML on the device.
+          for required in \
+            assets/index.html \
+            assets/sw.js \
+            assets/manifest.webmanifest \
+            assets/static/app.css \
+            assets/static/js/main.js \
+            assets/static/js/data/transport.js
+          do
+            unzip -l "$apk" | grep -q "$required" || {
+              echo "::error::$required is missing from the APK — the assets sync is wrong."
+              exit 1; }
+          done
+
+          count=$(unzip -l "$apk" | grep -c 'assets/static/js/.*\.js' || true)
           echo "$count JavaScript modules bundled"
-          # 25 modules reachable from main.js, per tests/shell.test.js.
+          # 27 modules reachable from main.js, per tests/shell.test.js.
           [ "$count" -ge 25 ] || { echo "::error::only $count modules bundled, expected 25+"; exit 1; }
 
       # R8 writes the exact keep rules it wanted into missing_rules.txt. Printing

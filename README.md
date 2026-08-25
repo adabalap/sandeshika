@@ -179,7 +179,7 @@ suite that reports red for a correct codebase is a suite people stop believing.
 
 ```bash
 npm run check                 # lint + typecheck + all JS suites (what CI runs)
-npm test                      # 875 assertions across 14 suites
+npm test                      # 880 assertions across 14 suites
 python3 tests/server_test.py  # 34 assertions — proxy, limiter, headers
 python3 tools/redact.py --selftest
 ```
@@ -188,7 +188,7 @@ python3 tools/redact.py --selftest
 ✓ analytics · parser · organizer · model · transport · learning
 ✓ pipeline · realcorpus · shell · native-bridge · boot · e2e
 ✓ provenance · redact
-14 suites · 875 passed · 0 failed        (+ 40 Python)
+14 suites · 880 passed · 0 failed        (+ 40 Python)
 ```
 
 Each suite is a plain script that counts assertions and exits non-zero, so any
@@ -210,7 +210,10 @@ Four of these check things no unit test can see:
   are gone and specific structure survives.
 - **`provenance.test.js`** holds a floor on how much of each message can be
   traced, so a bank format change cannot quietly switch the feature off.
-- **`native-bridge.test.js`** compares the `@JavascriptInterface` methods in
+- **`native-bridge.test.js`** resolves every absolute URL in `index.html` and
+  in the service worker's shell against the layout the Gradle sync produces, so
+  a mismatch between the page and the APK's asset mount fails here rather than
+  as an unstyled screen on the device. It also compares the `@JavascriptInterface` methods in
   `MedhaBridge.kt` against what `transport.js` calls — names, arity, and the
   trailing `callId` the async protocol needs. The two halves are connected only
   by string name at runtime, so a rename compiles, builds, installs, launches,
@@ -395,6 +398,7 @@ what it does with it. `INTERNET` is the only permission declared, and
 | Decision | Why |
 |---|---|
 | `WebViewAssetLoader` over `file://` | a `file://` page is an opaque origin — no service worker, no secure context — and the usual workaround hands page script the device filesystem |
+| Assets mounted at the **root** | `index.html` uses absolute paths (`/static/app.css`, `/sw.js`) because that is what `app.py` serves; one page is shared by both builds, so the APK must answer the same URLs. Mounting under `/assets/web/` left every one of them unresolvable — the app launched and rendered unstyled HTML |
 | Async bridge methods | a `@JavascriptInterface` call blocks the JS thread; a cold model load takes minutes, so a synchronous bridge would freeze the UI and end in an ANR |
 | Token in `EncryptedSharedPreferences` | it is a bearer credential for an API that can read every SMS; the page never sees it, and the page renders SMS-derived text |
 | Allowlist enforced in Kotlin | there is no Flask proxy inside the APK to enforce it, and without it the bridge is an open proxy onto Medha |
@@ -446,7 +450,7 @@ static/js/ui/
   views/                      overview, dashboard, daily, detail, transactions,
                               bills, inbox, ask, setup
 
-tests/                      14 JS suites (875) + server_test.py (40)
+tests/                      14 JS suites (880) + server_test.py (40)
 tools/redact.py             the same redaction, offline, for bulk corpus files
 tools/bump_version.py       moves all five version constants together
 tools/prune_stale.py        removes files an upgrade could not delete

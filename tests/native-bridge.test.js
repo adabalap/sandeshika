@@ -198,25 +198,97 @@ ok('the page cannot override the Authorization header',
 }
 
 // ---------------------------------------------------------------------------
-// 5. The bundled asset path the APK actually loads
+// 5. Every URL the page asks for must resolve inside the APK
+//
+// THE BUG THIS EXISTS FOR
+//
+// index.html uses absolute paths — /static/app.css, /static/js/main.js, /sw.js
+// — because that is what app.py serves, and one index.html is shared by both
+// builds. The APK mounted its assets under /assets/web/ instead, so every one
+// of those URLs pointed at a path with no handler behind it.
+//
+// Nothing failed loudly. The APK built, installed and launched, and rendered
+// raw unstyled HTML with every view visible at once — because `.hidden` comes
+// from the stylesheet that never loaded. It read as a catastrophically broken
+// app. It was one wrong prefix, and no test could see it, because the Kotlin
+// compiled and the web suite passed.
 // ---------------------------------------------------------------------------
 {
   const activity = read(path.join(ROOT, 'app/src/main/java/com/adabala/sandeshika/MainActivity.kt'));
-  const startUrl = (activity.match(/startUrl = "([^"]+)"/) || [])[1] || '';
+  const gradle = read(path.join(ROOT, 'app/build.gradle.kts'));
+  const html = read(path.join(ROOT, 'static/index.html'));
 
-  ok('the WebView loads the app over the asset-loader origin',
+  const startUrl = (activity.match(/startUrl = "([^"]+)"/) || [])[1] || '';
+  ok('the WebView loads over the asset-loader origin',
     startUrl.startsWith('https://appassets.androidplatform.net/'),
     `startUrl is "${startUrl}" — a file:// origin has no service worker and no secure context`);
 
-  // The Gradle sync copies static/ to assets/web, so the entry point the
-  // activity asks for has to be the one that lands there.
-  const rel = startUrl.replace('https://appassets.androidplatform.net/assets/', '');
-  eq('the entry point is web/index.html', rel, 'web/index.html');
-  ok('static/index.html is what gets copied there',
-    fs.existsSync(path.join(ROOT, 'static/index.html')));
+  const handlerPrefix = (activity.match(/addPathHandler\("([^"]+)"/) || [])[1] || '';
+  ok('the asset handler is mounted at the root', handlerPrefix === '/',
+    `mounted at "${handlerPrefix}" — absolute paths in index.html would not resolve`);
 
-  const gradle = read(path.join(ROOT, 'app/build.gradle.kts'));
-  ok('Gradle syncs the web app into assets',
+  /**
+   * Where a URL path lands in the APK's assets, given a root-mounted handler.
+   * @param {string} urlPath
+   */
+  const assetFor = (urlPath) => `assets${urlPath}`;
+
+  /*
+   * The layout the Gradle sync produces. Mirrors app.py: index.html, sw.js and
+   * the manifest at the root, everything else under /static/.
+   */
+  const syncsRootFiles = /include\("index\.html", "sw\.js", "manifest\.webmanifest"\)/.test(gradle);
+  ok('Gradle copies index.html, sw.js and the manifest to the assets root',
+    syncsRootFiles,
+    'sw.js in particular cannot claim scope "/" from anywhere but the root');
+  ok('Gradle copies the rest under static/', /into\("static"\)/.test(gradle),
+    'so /static/app.css resolves to assets/static/app.css');
+
+  /** Does this URL path exist in the bundle the sync will produce? */
+  const resolves = (urlPath) => {
+    if (urlPath === '/') return true; // the SW precaches it; c.add failures are caught
+    if (urlPath.startsWith('/static/')) {
+      return fs.existsSync(path.join(ROOT, urlPath.replace('/static/', 'static/')));
+    }
+    if (['/index.html', '/sw.js', '/manifest.webmanifest'].includes(urlPath)) {
+      return fs.existsSync(path.join(ROOT, 'static', urlPath.slice(1)));
+    }
+    return false;
+  };
+
+  // Every absolute URL the page references: stylesheet, modules, icons,
+  // manifest, service worker.
+  const referenced = [
+    ...[...html.matchAll(/(?:href|src)="(\/[^"]+)"/g)].map((m) => m[1]),
+    ...[...html.matchAll(/register\('(\/[^']+)'/g)].map((m) => m[1]),
+  ].filter((u) => !u.startsWith('//'));
+
+  ok('index.html references absolute paths worth checking', referenced.length >= 4,
+    JSON.stringify(referenced));
+
+  const unresolved = [...new Set(referenced)].filter((u) => !resolves(u));
+  ok('every URL index.html references resolves inside the APK bundle',
+    unresolved.length === 0,
+    `${unresolved.join(', ')}\n     `
+    + `With the handler at "${handlerPrefix}", these map to `
+    + `${unresolved.map(assetFor).join(', ')} and nothing is copied there. `
+    + 'The app would launch and render unstyled HTML.');
+
+  // The entry point itself has to be one of the files that gets copied.
+  const entry = startUrl.replace('https://appassets.androidplatform.net', '');
+  ok('the start URL resolves in the bundle', resolves(entry),
+    `${entry} is not produced by the asset sync`);
+
+  // Everything the offline shell precaches must also resolve, or the app works
+  // online and breaks the moment it is opened without a connection.
+  const swSrc = read(path.join(ROOT, 'static/sw.js'));
+  const shellBlock = swSrc.match(/const SHELL = \[([\s\S]*?)\];/);
+  const shellUrls = [...(shellBlock ? shellBlock[1] : '').matchAll(/'([^']+)'/g)].map((m) => m[1]);
+  const shellUnresolved = shellUrls.filter((u) => !resolves(u));
+  ok('every service-worker shell URL resolves inside the APK bundle',
+    shellUnresolved.length === 0, shellUnresolved.join(', '));
+
+  ok('Gradle syncs the web app from static/',
     /syncWebAssets/.test(gradle) && /rootProject\.file\("static"\)/.test(gradle),
     'nothing copies static/ into the APK, so it would open a blank screen');
 }

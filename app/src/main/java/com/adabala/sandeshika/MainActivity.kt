@@ -44,7 +44,13 @@ class MainActivity : AppCompatActivity() {
     // silently swapping places.
     private lateinit var settingsStore: SettingsStore
 
-    private val startUrl = "https://appassets.androidplatform.net/assets/web/index.html"
+    /*
+     * The same URL space app.py serves, so one index.html works in both builds.
+     * Loading from /assets/web/ instead left every absolute path in the page —
+     * /static/app.css, /static/js/main.js, /sw.js — pointing at URLs with no
+     * handler behind them.
+     */
+    private val startUrl = "https://appassets.androidplatform.net/index.html"
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -52,9 +58,18 @@ class MainActivity : AppCompatActivity() {
 
         settingsStore = SettingsStore(this)
 
+        /*
+         * Mounted at the ROOT, not at /assets/.
+         *
+         * The handler strips its prefix and resolves the rest against the APK's
+         * assets directory, so "/" here means /static/app.css lands on
+         * assets/static/app.css and /sw.js on assets/sw.js — exactly the paths
+         * app.py serves. The service worker also needs its script at the root:
+         * a worker cannot claim a scope above its own path.
+         */
         val assetLoader = WebViewAssetLoader.Builder()
             .setDomain("appassets.androidplatform.net")
-            .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this))
+            .addPathHandler("/", WebViewAssetLoader.AssetsPathHandler(this))
             .build()
 
         webView = WebView(this).apply {

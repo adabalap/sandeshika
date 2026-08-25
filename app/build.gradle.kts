@@ -127,14 +127,43 @@ dependencies {
 val webRoot = rootProject.file("static")
 
 val syncWebAssets by tasks.registering(Sync::class) {
-    description = "Copies the PWA from static/ into the APK's assets."
+    description = "Copies the PWA into the APK's assets, mirroring the Flask URL space."
     group = "build"
 
-    from(webRoot)
-    into(layout.buildDirectory.dir("generated/webAssets/web"))
+    val out = layout.buildDirectory.dir("generated/webAssets")
+    into(out)
 
-    // Never ship developer tooling or caches inside the APK.
-    exclude("**/.DS_Store", "**/*.map", "**/node_modules/**")
+    /*
+     * THE ASSET LAYOUT MUST MATCH THE FLASK URL SPACE EXACTLY.
+     *
+     * index.html references absolute paths — /static/app.css, /static/js/main.js,
+     * /sw.js, /manifest.webmanifest — because that is what app.py serves. One
+     * index.html is shared by both builds, so the APK has to answer the same
+     * URLs or none of them resolve.
+     *
+     * An earlier version mounted everything under /assets/web/ and loaded the
+     * page from there. Every absolute path then pointed at a URL with no
+     * handler behind it: no stylesheet, no modules, no service worker. The app
+     * launched and rendered raw unstyled HTML with every view visible at once,
+     * because even `.hidden` comes from the stylesheet. It looked like a
+     * catastrophically broken app; it was one wrong prefix.
+     *
+     *   assets/index.html            <- served at /
+     *   assets/sw.js                 <- /sw.js, needs root scope
+     *   assets/manifest.webmanifest  <- /manifest.webmanifest
+     *   assets/static/**             <- /static/**
+     */
+    from(webRoot) {
+        into("static")
+        exclude("**/.DS_Store", "**/*.map", "**/node_modules/**")
+    }
+
+    // The three files Flask serves from the root rather than from /static/.
+    // sw.js in particular MUST be at the root: a worker cannot claim a scope
+    // above its own path, so one served from /static/ could never control "/".
+    from(webRoot) {
+        include("index.html", "sw.js", "manifest.webmanifest")
+    }
 
     doFirst {
         if (!webRoot.exists()) {
@@ -145,8 +174,11 @@ val syncWebAssets by tasks.registering(Sync::class) {
                 "If you extracted a release archive into a subfolder, move its contents up."
             )
         }
-        val entry = File(webRoot, "index.html")
-        if (!entry.exists()) throw GradleException("static/index.html is missing — the APK would open a blank screen.")
+        for (required in listOf("index.html", "app.css", "sw.js", "js/main.js")) {
+            if (!File(webRoot, required).exists()) {
+                throw GradleException("static/$required is missing — the APK would open a blank screen.")
+            }
+        }
     }
 }
 
