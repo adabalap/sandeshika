@@ -1,125 +1,70 @@
-import java.util.Properties
-
 plugins {
-    alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
-    alias(libs.plugins.kotlin.compose)
-    alias(libs.plugins.kotlin.serialization)
-    alias(libs.plugins.ksp)
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
 }
 
-// ════════════════════════════════════════════════════════════════════════
-//  .env loader
+// NOTE ON COMMENT STYLE IN THIS FILE
 //
-//  Precedence, highest first:
-//     1. process environment  (CI:  SANDESHIKA_MEDHA_PORT=9000 ./gradlew)
-//     2. .env                 (developer machine, gitignored)
-//     3. .env.example         (committed default of record)
-//
-//  .env.example is loaded as the base layer rather than as a fallback for
-//  missing keys only. That way adding a key to the example file gives every
-//  developer a working default without them having to re-copy their .env,
-//  and a build never fails because someone's months-old .env predates a new
-//  setting.
-// ════════════════════════════════════════════════════════════════════════
-val env: Map<String, String> = run {
-    fun read(f: File): Map<String, String> =
-        if (!f.exists()) emptyMap()
-        else Properties().apply { f.inputStream().use { load(it) } }
-            .entries.associate { (k, v) -> k.toString() to v.toString().trim() }
+// Line comments only, deliberately. Kotlin block comments NEST, so a glob
+// pattern written inside one - the kind this file is full of - opens a nested
+// comment that never closes, and the outer comment then swallows real code
+// until it meets a stray close sequence inside a string literal. That produced
+// a parse error tens of lines below the actual mistake and cost a full build
+// cycle to find. tools/check_kotlin_comments.py now fails on it.
 
-    val example = read(rootProject.file(".env.example"))
-    val local = read(rootProject.file(".env"))
-    val merged = (example + local).toMutableMap()
-
-    // Process env wins. Prefixed to avoid colliding with unrelated CI vars.
-    merged.keys.toList().forEach { key ->
-        System.getenv("SANDESHIKA_$key")?.takeIf { it.isNotBlank() }?.let { merged[key] = it }
-    }
-    if (local.isEmpty()) {
-        logger.lifecycle("Sandeshika: no .env found — using .env.example defaults. " +
-                "Run `cp .env.example .env` to customise.")
-    }
-    merged
-}
-
-fun envStr(key: String, fallback: String = ""): String = env[key] ?: fallback
-fun envInt(key: String, fallback: Int): Int = env[key]?.toIntOrNull() ?: fallback
-fun envBool(key: String, fallback: Boolean): Boolean =
-    env[key]?.lowercase()?.let { it == "true" || it == "1" || it == "yes" } ?: fallback
+// Kept in step with package.json, static/sw.js, static/js/main.js and app.py.
+// tests/shell.test.js fails when those disagree, and the app warns the user
+// about a stale cache when the page build differs from the server's.
+val appVersionName = "2.3.0"
+val appVersionCode = 20300
 
 android {
     namespace = "com.adabala.sandeshika"
-    compileSdk = envInt("APP_TARGET_SDK", 35)
+    compileSdk = 34
 
     defaultConfig {
-        applicationId = envStr("APP_ID", "com.adabala.sandeshika")
-        minSdk = envInt("APP_MIN_SDK", 29)
-        targetSdk = envInt("APP_TARGET_SDK", 35)
-        versionCode = envInt("APP_VERSION_CODE", 1)
-        versionName = envStr("APP_VERSION_NAME", "0.1.0")
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-
-        // ── Every .env value that the app needs at runtime is surfaced here
-        //    as a BuildConfig default. AppConfig then layers the DataStore
-        //    override on top, so ports and tokens stay changeable after
-        //    install without a rebuild.
-        fun s(name: String, key: String, fb: String = "") =
-            buildConfigField("String", name, "\"${envStr(key, fb)}\"")
-        fun i(name: String, key: String, fb: Int) =
-            buildConfigField("int", name, envInt(key, fb).toString())
-        fun b(name: String, key: String, fb: Boolean) =
-            buildConfigField("boolean", name, envBool(key, fb).toString())
-        fun f(name: String, key: String, fb: Double) =
-            buildConfigField("float", name, "${env[key]?.toFloatOrNull() ?: fb}f")
-
-        s("MEDHA_HOST", "MEDHA_HOST", "127.0.0.1")
-        i("MEDHA_PORT", "MEDHA_PORT", 8080)
-        s("MEDHA_TOKEN", "MEDHA_TOKEN")
-        s("MEDHA_CLIENT_ID", "MEDHA_CLIENT_ID", "sandeshika")
-        s("MEDHA_NAMESPACE", "MEDHA_NAMESPACE", "sms")
-        b("MEDHA_ENABLED", "MEDHA_ENABLED", true)
-        i("MEDHA_HEALTH_POLL_SECONDS", "MEDHA_HEALTH_POLL_SECONDS", 60)
-        i("MEDHA_CONNECT_TIMEOUT_SECONDS", "MEDHA_CONNECT_TIMEOUT_SECONDS", 5)
-        i("MEDHA_READ_TIMEOUT_SECONDS", "MEDHA_READ_TIMEOUT_SECONDS", 180)
-        i("MEDHA_BATCH_SIZE", "MEDHA_BATCH_SIZE", 12)
-        i("MEDHA_MAX_RETRIES", "MEDHA_MAX_RETRIES", 4)
-        i("MEDHA_RETRY_BASE_SECONDS", "MEDHA_RETRY_BASE_SECONDS", 8)
-
-        i("INGEST_BACKFILL_PAGE_SIZE", "INGEST_BACKFILL_PAGE_SIZE", 300)
-        i("INGEST_BACKFILL_MAX_MESSAGES", "INGEST_BACKFILL_MAX_MESSAGES", 0)
-        i("INGEST_HISTORY_DAYS", "INGEST_HISTORY_DAYS", 0)
-        i("INGEST_SWEEP_MINUTES", "INGEST_SWEEP_MINUTES", 15)
-        i("INGEST_OBSERVER_DEBOUNCE_MS", "INGEST_OBSERVER_DEBOUNCE_MS", 1500)
-
-        i("OTP_RETENTION_HOURS", "OTP_RETENTION_HOURS", 24)
-        i("PROMO_RETENTION_DAYS", "PROMO_RETENTION_DAYS", 30)
-        b("REQUIRE_BIOMETRIC", "REQUIRE_BIOMETRIC", true)
-        i("BIOMETRIC_TIMEOUT_MINUTES", "BIOMETRIC_TIMEOUT_MINUTES", 5)
-        b("DB_ENCRYPTION", "DB_ENCRYPTION", true)
-        b("FLAG_SECURE", "FLAG_SECURE", true)
-
-        f("TEMPLATE_MERGE_RATIO", "TEMPLATE_MERGE_RATIO", 0.62)
-        i("TEMPLATE_PREFIX_TOKENS", "TEMPLATE_PREFIX_TOKENS", 3)
-        i("LINK_MERGE_THRESHOLD", "LINK_MERGE_THRESHOLD", 60)
-        i("LINK_ADJUDICATE_MIN", "LINK_ADJUDICATE_MIN", 30)
-        i("AMOUNT_WINDOW_HOURS", "AMOUNT_WINDOW_HOURS", 48)
-        f("REVIEW_CONFIDENCE_FLOOR", "REVIEW_CONFIDENCE_FLOOR", 0.55)
-
-        s("DEFAULT_CURRENCY", "DEFAULT_CURRENCY", "INR")
-        s("DEFAULT_LOCALE", "DEFAULT_LOCALE", "en-IN")
-        s("DATE_ORDER", "DATE_ORDER", "DMY")
-        s("DEFAULT_TIMEZONE", "DEFAULT_TIMEZONE", "Asia/Kolkata")
-        s("LOG_LEVEL", "LOG_LEVEL", "INFO")
-        b("DEBUG_KEEP_QUARANTINE", "DEBUG_KEEP_QUARANTINE", true)
+        applicationId = "com.adabala.sandeshika"
+        minSdk = 26
+        targetSdk = 34
+        versionCode = appVersionCode
+        versionName = appVersionName
+        resValue("string", "app_version", appVersionName)
     }
 
-    // Release signing only when the secrets exist, mirroring Medha's CI shape.
+    // TWO FLAVOURS, mirroring Medha's own split.
+    //
+    // "core" ships without SMS-adjacent capability so it installs cleanly and
+    // can be handed to anyone. "full" is the build that reads an inbox.
+    //
+    // Sandeshika itself never holds READ_SMS in either flavour: it asks Medha
+    // for messages over loopback, and Medha is the app that holds the
+    // permission. The flavour only controls whether the SMS features exist.
+    flavorDimensions += "capability"
+    productFlavors {
+        create("core") {
+            dimension = "capability"
+            applicationIdSuffix = ".core"
+            versionNameSuffix = "-core"
+            resValue("string", "app_name", "Sandeshika Core")
+            buildConfigField("boolean", "SMS_ENABLED", "false")
+        }
+        create("full") {
+            dimension = "capability"
+            resValue("string", "app_name", "Sandeshika")
+            buildConfigField("boolean", "SMS_ENABLED", "true")
+        }
+    }
+
     signingConfigs {
         create("release") {
-            val ksPath = System.getenv("SANDESHIKA_KEYSTORE_PATH")
-            if (ksPath != null && File(ksPath).exists()) {
-                storeFile = File(ksPath)
+            // Read from the environment so no key material is ever committed.
+            // When the variables are absent - a local build, or a fork's CI -
+            // the release build falls back to the debug key rather than
+            // failing: an unsigned artifact you cannot install is less useful
+            // than a debug-signed one you can.
+            val storePath = System.getenv("SANDESHIKA_KEYSTORE")
+            if (!storePath.isNullOrBlank() && file(storePath).exists()) {
+                storeFile = file(storePath)
                 storePassword = System.getenv("SANDESHIKA_KEYSTORE_PASSWORD")
                 keyAlias = System.getenv("SANDESHIKA_KEY_ALIAS")
                 keyPassword = System.getenv("SANDESHIKA_KEY_PASSWORD")
@@ -128,19 +73,23 @@ android {
     }
 
     buildTypes {
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+            val hasKey = !System.getenv("SANDESHIKA_KEYSTORE").isNullOrBlank()
+            signingConfig = if (hasKey) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
+        }
         debug {
             applicationIdSuffix = ".debug"
             isMinifyEnabled = false
-        }
-        release {
-            // R8 is off for now: OkHttp, kotlinx.serialization and Room all
-            // need keep rules, and they fail at RUNTIME, not build time.
-            // Shipping unminified is the honest choice until rules are written.
-            isMinifyEnabled = false
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            if (System.getenv("SANDESHIKA_KEYSTORE_PATH") != null) {
-                signingConfig = signingConfigs.getByName("release")
-            }
         }
     }
 
@@ -149,49 +98,121 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { compose = true; buildConfig = true }
-    packaging { resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" } }
-    testOptions { unitTests { isReturnDefaultValues = true } }
+
+    buildFeatures { buildConfig = true }
+
+    packaging {
+        resources.excludes += setOf("META-INF/DEPENDENCIES", "META-INF/LICENSE.md")
+    }
 }
 
-// Room schema export — required for migration tests, which PRODUCTION-READINESS
-// flags as the single highest-consequence untested path in Medha. Not repeating it.
-ksp { arg("room.schemaLocation", "$projectDir/schemas") }
-
 dependencies {
-    implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.lifecycle.runtime.ktx)
-    implementation(libs.androidx.lifecycle.viewmodel)
-    implementation(libs.androidx.activity.compose)
-    implementation(libs.androidx.navigation.compose)
+    implementation("androidx.core:core-ktx:1.13.1")
+    implementation("androidx.appcompat:appcompat:1.7.0")
+    implementation("androidx.activity:activity-ktx:1.9.2")
+    implementation("androidx.webkit:webkit:1.11.0")
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    testImplementation("junit:junit:4.13.2")
+}
 
-    implementation(platform(libs.compose.bom))
-    implementation(libs.compose.ui)
-    implementation(libs.compose.ui.graphics)
-    implementation(libs.compose.ui.tooling.preview)
-    implementation(libs.compose.material3)
-    implementation(libs.compose.material.icons)
-    implementation(libs.compose.adaptive.navigation)
-    debugImplementation(libs.compose.ui.tooling)
+// THE PWA IS THE APP.
+//
+// static/ is the single source of truth for the interface, shared with the
+// browser build. It is copied into assets at build time rather than duplicated
+// into this project: two copies of an entire front end drift apart within a
+// week, and the divergence only shows up as a bug that reproduces on the phone
+// and nowhere else.
+val webRoot = rootProject.file("static")
 
-    implementation(libs.room.runtime)
-    implementation(libs.room.ktx)
-    ksp(libs.room.compiler)
-    implementation(libs.sqlcipher)
-    implementation(libs.sqlite.ktx)
+// THE ASSET LAYOUT MUST MATCH THE FLASK URL SPACE EXACTLY.
+//
+// index.html references absolute paths because that is what app.py serves, and
+// one index.html is shared by both builds, so the APK has to answer the same
+// URLs or none of them resolve.
+//
+// An earlier version mounted everything one directory deeper and loaded the
+// page from there. Every absolute path then pointed at a URL with no handler
+// behind it: no stylesheet, no modules, no service worker. The app launched and
+// rendered raw unstyled HTML with every view visible at once, because even the
+// hidden class comes from the stylesheet. It looked like a catastrophically
+// broken app; it was one wrong prefix.
+//
+// Produced layout, relative to the APK's assets directory:
+//
+//     index.html            served at the root
+//     sw.js                 must be at the root to claim root scope
+//     manifest.webmanifest  served at the root
+//     static/               everything else, under the static prefix
+val syncWebAssets by tasks.registering(Sync::class) {
+    description = "Copies the PWA into the APK's assets, mirroring the Flask URL space."
+    group = "build"
 
-    implementation(libs.work.runtime.ktx)
-    implementation(libs.datastore.preferences)
-    implementation(libs.security.crypto)
-    implementation(libs.biometric)
+    into(layout.buildDirectory.dir("generated/webAssets"))
 
-    implementation(libs.okhttp)
-    implementation(libs.kotlinx.serialization.json)
-    implementation(libs.kotlinx.coroutines.android)
+    from(webRoot) {
+        into("static")
+        exclude("**/.DS_Store")
+        exclude("**/*.map")
+        exclude("**/node_modules/**")
+    }
 
-    testImplementation(libs.junit)
-    testImplementation(libs.kotlinx.coroutines.test)
-    testImplementation(libs.robolectric)
-    androidTestImplementation(libs.androidx.test.junit)
-    androidTestImplementation(libs.room.testing)
+    // The three files Flask serves from the root rather than under static.
+    // sw.js in particular MUST be at the root: a service worker cannot claim a
+    // scope above its own path, so one served from a subdirectory could never
+    // control the whole app.
+    from(webRoot) {
+        include("index.html", "sw.js", "manifest.webmanifest")
+    }
+
+    doFirst {
+        if (!webRoot.exists()) {
+            throw GradleException(
+                "static/ was not found at ${webRoot.absolutePath}.\n" +
+                    "The Android project must sit at the SAME repository root as the web app:\n" +
+                    "  settings.gradle.kts, app/, gradlew, static/, app.py\n" +
+                    "If a release archive was extracted into a subfolder, move its contents up.",
+            )
+        }
+        val required = listOf("index.html", "app.css", "sw.js", "js/main.js")
+        for (name in required) {
+            if (!File(webRoot, name).exists()) {
+                throw GradleException(
+                    "static/$name is missing - the APK would open a blank screen.",
+                )
+            }
+        }
+    }
+}
+
+android.sourceSets.getByName("main") {
+    assets.srcDir(layout.buildDirectory.dir("generated/webAssets"))
+}
+
+// A build-time guard, not a runtime surprise.
+//
+// versionName here is a fifth copy of a number that already lives in four other
+// files. When it drifts, the running app tells the user their cache is stale -
+// a warning that is then wrong for everyone and quickly learned to be ignored.
+val checkVersionAgreement by tasks.registering {
+    description = "Fails if the APK version disagrees with package.json."
+    group = "verification"
+    doLast {
+        val pkg = rootProject.file("package.json")
+        if (pkg.exists()) {
+            val declared = Regex("\"version\"\\s*:\\s*\"([^\"]+)\"")
+                .find(pkg.readText())?.groupValues?.get(1)
+            if (declared != null && declared != appVersionName) {
+                throw GradleException(
+                    "Version mismatch: app/build.gradle.kts says $appVersionName, " +
+                        "package.json says $declared.\n" +
+                        "Run: python3 tools/bump_version.py $declared",
+                )
+            }
+        }
+    }
+}
+
+tasks.named("preBuild") {
+    dependsOn(syncWebAssets, checkVersionAgreement)
 }

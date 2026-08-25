@@ -1,12 +1,15 @@
-.env
-*.jks
-*.keystore
+.venv/
+__pycache__/
+*.pyc
+node_modules/
+
+# Contains your Medha API token in plaintext. Never commit it.
+settings.json
+
+# Android
+/build/
+/app/build/
+/.gradle/
 local.properties
-.gradle/
-build/
-app/build/
-.idea/
-*.iml
-captures/
-.externalNativeBuild/
-.cxx/
+*.keystore
+*.jks

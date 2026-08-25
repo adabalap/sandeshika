@@ -1,195 +1,196 @@
 package com.adabala.sandeshika
 
-import android.Manifest
+import android.annotation.SuppressLint
 import android.os.Bundle
-import android.view.WindowManager
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
-import androidx.compose.runtime.*
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.unit.dp
-import com.adabala.sandeshika.data.db.IngestState
-import com.adabala.sandeshika.di.Graph
-import com.adabala.sandeshika.ingest.IngestWorker
-import com.adabala.sandeshika.ingest.SmsReader
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
+import android.view.ViewGroup
+import android.webkit.ConsoleMessage
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import androidx.activity.OnBackPressedCallback
+import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
+import androidx.webkit.ServiceWorkerClientCompat
+import androidx.webkit.ServiceWorkerControllerCompat
+import androidx.webkit.WebViewAssetLoader
+import androidx.webkit.WebViewFeature
 
 /**
- * P0 shell.
+ * Hosts the PWA.
  *
- * NavigationSuiteScaffold gives bottom bar on a phone, navigation rail when
- * unfolded, and a drawer on a tablet -- with no breakpoint code. That is the
- * whole reason this is Compose and not a WebView: the adaptive behaviour the
- * design called for is one component, not a CSS problem.
+ * The interface is the same `static/` directory the Flask build serves — copied
+ * into assets at build time rather than duplicated into this project, because
+ * two copies of an app's whole front end drift apart within a week and the
+ * divergence only shows up as a bug that reproduces on the phone and nowhere
+ * else.
  *
- * Only Home is implemented, and deliberately as a diagnostics surface: at P0
- * the interesting question is whether ingestion and template mining are
- * actually working on a real inbox. The Money screen lands at P2.
+ * WHY THE ASSET LOADER RATHER THAN file:///android_asset
+ *
+ * A `file://` page is an opaque origin: no service worker, no secure context,
+ * no localStorage worth relying on, and `allowFileAccessFromFileURLs` — the
+ * usual workaround — hands any script on the page the ability to read the
+ * device's filesystem. WebViewAssetLoader serves the same files over
+ * `https://appassets.androidplatform.net/`, which is a proper secure origin.
+ * The service worker registers, the offline shell works, and the file system
+ * stays unreachable.
  */
-class MainActivity : ComponentActivity() {
+class MainActivity : AppCompatActivity() {
 
-    private val requestSms = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted) {
-            (application as SandeshikaApp).observer.register()
-            IngestWorker.enqueueBackfill(this)
-            IngestWorker.schedulePeriodicSweep(this, BuildConfig.INGEST_SWEEP_MINUTES)
-        }
-    }
+    private lateinit var webView: WebView
+    // NOT named `settings`: inside `WebView(...).apply { }` that would resolve
+    // to WebView.getSettings(), and the two would be one rename apart from
+    // silently swapping places.
+    private lateinit var settingsStore: SettingsStore
 
+    /*
+     * The same URL space app.py serves, so one index.html works in both builds.
+     * Loading from /assets/web/ instead left every absolute path in the page —
+     * /static/app.css, /static/js/main.js, /sw.js — pointing at URLs with no
+     * handler behind them.
+     */
+    private val startUrl = "https://appassets.androidplatform.net/index.html"
+
+    @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
 
-        // Keeps the money dashboard out of the recents thumbnail.
-        if (BuildConfig.FLAG_SECURE) {
-            window.setFlags(WindowManager.LayoutParams.FLAG_SECURE,
-                WindowManager.LayoutParams.FLAG_SECURE)
-        }
+        settingsStore = SettingsStore(this)
 
-        setContent {
-            MaterialTheme {
-                var dest by rememberSaveable { mutableStateOf(Dest.HOME) }
-                NavigationSuiteScaffold(
-                    navigationSuiteItems = {
-                        Dest.entries.forEach { d ->
-                            item(
-                                selected = d == dest,
-                                onClick = { dest = d },
-                                icon = { Icon(d.icon, contentDescription = d.label) },
-                                label = { Text(d.label) }
-                            )
-                        }
-                    }
-                ) {
-                    when (dest) {
-                        Dest.HOME -> HomeScreen(
-                            onGrant = { requestSms.launch(Manifest.permission.READ_SMS) },
-                            onBackfill = { IngestWorker.enqueueBackfill(this@MainActivity) }
-                        )
-                        else -> Placeholder(dest.label)
-                    }
+        /*
+         * Mounted at the ROOT, not at /assets/.
+         *
+         * The handler strips its prefix and resolves the rest against the APK's
+         * assets directory, so "/" here means /static/app.css lands on
+         * assets/static/app.css and /sw.js on assets/sw.js — exactly the paths
+         * app.py serves. The service worker also needs its script at the root:
+         * a worker cannot claim a scope above its own path.
+         */
+        val assetLoader = WebViewAssetLoader.Builder()
+            .setDomain("appassets.androidplatform.net")
+            .addPathHandler("/", WebViewAssetLoader.AssetsPathHandler(this))
+            .build()
+
+        webView = WebView(this).apply {
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            )
+
+            settings.apply {   // WebSettings
+                javaScriptEnabled = true
+
+                // The app stores scan cursors in localStorage. Everything
+                // durable lives in Medha's store, not here.
+                domStorageEnabled = true
+
+                // Nothing in this app reads a file, a content provider, or a
+                // remote origin. Each of these is a way for page script to
+                // reach something it has no business reaching.
+                allowFileAccess = false
+                allowContentAccess = false
+                @Suppress("DEPRECATION")
+                allowFileAccessFromFileURLs = false
+                @Suppress("DEPRECATION")
+                allowUniversalAccessFromFileURLs = false
+                mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                javaScriptCanOpenWindowsAutomatically = false
+                setGeolocationEnabled(false)
+                setSupportMultipleWindows(false)
+
+                // The layout is already responsive and sized for a phone;
+                // letting the WebView second-guess it produces a zoomed-out
+                // desktop rendering on first paint.
+                useWideViewPort = false
+                loadWithOverviewMode = false
+                builtInZoomControls = false
+
+                // Text should follow the app's own type scale, not the system
+                // font scale applied twice — the CSS already respects rem.
+                textZoom = 100
+            }
+
+            webViewClient = object : WebViewClient() {
+                override fun shouldInterceptRequest(
+                    view: WebView,
+                    request: WebResourceRequest,
+                ): WebResourceResponse? = assetLoader.shouldInterceptRequest(request.url)
+
+                /**
+                 * Nothing navigates away from the app shell.
+                 *
+                 * An SMS body can contain a link, and those bodies are rendered
+                 * in the inbox view. A stray navigation would replace the whole
+                 * app with an attacker's page inside a WebView that has a
+                 * JavaScript bridge attached to it.
+                 */
+                override fun shouldOverrideUrlLoading(
+                    view: WebView,
+                    request: WebResourceRequest,
+                ): Boolean = request.url.host != "appassets.androidplatform.net"
+            }
+
+            webChromeClient = object : WebChromeClient() {
+                override fun onConsoleMessage(msg: ConsoleMessage): Boolean {
+                    // Surfaced in logcat so a page-side error during a real
+                    // import is diagnosable without attaching a debugger.
+                    android.util.Log.d("Sandeshika", "${msg.message()} @${msg.lineNumber()}")
+                    return true
                 }
             }
         }
-    }
 
-    enum class Dest(val label: String, val icon: ImageVector) {
-        HOME("Home", Icons.Filled.Home),
-        MONEY("Money", Icons.Filled.AccountBalanceWallet),
-        ACTIONS("Actions", Icons.Filled.CheckCircle),
-        INBOX("Inbox", Icons.Filled.Inbox),
-        MORE("More", Icons.Filled.MoreHoriz)
-    }
-}
-
-@Composable
-private fun Placeholder(label: String) {
-    Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
-        Text("$label — arrives in a later phase", style = MaterialTheme.typography.bodyLarge)
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun HomeScreen(onGrant: () -> Unit, onBackfill: () -> Unit) {
-    val ctx = androidx.compose.ui.platform.LocalContext.current
-    val scope = rememberCoroutineScope()
-
-    var canRead by remember { mutableStateOf(SmsReader(ctx).canRead()) }
-    var stored by remember { mutableStateOf(0) }
-    var templates by remember { mutableStateOf(0) }
-    var covered by remember { mutableStateOf(0) }
-    var onDevice by remember { mutableStateOf(0) }
-    var state by remember { mutableStateOf<IngestState?>(null) }
-
-    LaunchedEffect(canRead) {
-        canRead = SmsReader(ctx).canRead()
-        if (!canRead) return@LaunchedEffect
-        onDevice = SmsReader(ctx).totalMessages()
-        val db = Graph.database(ctx)
-        stored = db.sms().count()
-        templates = db.templates().countFlow().first()
-        covered = db.templates().coveredMessages()
-        state = db.ingestState().get()
-    }
-
-    Column(
-        Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Text("సందేశిక", style = MaterialTheme.typography.headlineMedium)
-        Text("Sandeshika", style = MaterialTheme.typography.labelLarge)
-
-        if (!canRead) {
-            ElevatedCard {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(stringResource(R.string.perm_title),
-                        style = MaterialTheme.typography.titleMedium)
-                    Text(stringResource(R.string.perm_body),
-                        style = MaterialTheme.typography.bodyMedium)
-                    Button(onClick = onGrant) { Text(stringResource(R.string.perm_grant)) }
+        /*
+         * The service worker fetches through its own path, not the page's, so
+         * it needs the asset loader wired up separately. Without this the
+         * offline shell silently fails to cache anything and the app only works
+         * while the WebView happens to have the files in memory.
+         */
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.SERVICE_WORKER_BASIC_USAGE)) {
+            ServiceWorkerControllerCompat.getInstance().setServiceWorkerClient(
+                object : ServiceWorkerClientCompat() {
+                    override fun shouldInterceptRequest(
+                        request: WebResourceRequest,
+                    ): WebResourceResponse? = assetLoader.shouldInterceptRequest(request.url)
                 }
-            }
-            return@Column
+            )
         }
 
-        // P0 is about proving ingestion and mining work on a real inbox, so the
-        // home screen reports exactly the numbers that answer that.
-        StatCard("Ingestion", listOf(
-            "On device" to onDevice.toString(),
-            "Stored" to stored.toString(),
-            "Backfill" to if (state?.backfillComplete == true) "complete" else "running"
-        ))
-
-        val coverage = if (stored > 0) covered * 100 / stored else 0
-        StatCard("Template bank", listOf(
-            "Templates" to templates.toString(),
-            "Coverage" to "$coverage%",
-            "Msgs per template" to if (templates > 0) "${stored / templates}" else "—"
-        ))
-
-        OutlinedButton(onClick = {
-            onBackfill()
-            scope.launch { /* stats refresh on next composition */ }
-        }) { Text("Run backfill now") }
-
-        Text(
-            "Coverage is the share of messages explained by a template seen more " +
-                "than once. It is the number that decides how much work Medha " +
-                "ever has to do.",
-            style = MaterialTheme.typography.bodySmall
+        webView.addJavascriptInterface(
+            MedhaBridge(webView, settingsStore, lifecycleScope),
+            MedhaBridge.NAME,
         )
-    }
-}
 
-@Composable
-private fun StatCard(title: String, rows: List<Pair<String, String>>) {
-    ElevatedCard {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium)
-            rows.forEach { (k, v) ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(k, style = MaterialTheme.typography.bodyMedium)
-                    Text(v, style = MaterialTheme.typography.bodyMedium)
-                }
+        setContentView(webView)
+
+        // The app is a stack of views inside one page; back should move within
+        // it and only leave at the top, which is what a user expects from
+        // anything that looks like this.
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (webView.canGoBack()) webView.goBack() else finish()
             }
-        }
+        })
+
+        if (savedInstanceState == null) webView.loadUrl(startUrl)
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        webView.saveState(outState)
+    }
+
+    override fun onRestoreInstanceState(savedInstanceState: Bundle) {
+        super.onRestoreInstanceState(savedInstanceState)
+        webView.restoreState(savedInstanceState)
+    }
+
+    override fun onDestroy() {
+        // Detached before destruction: destroying an attached WebView leaks the
+        // activity, and this one holds a bridge with a coroutine scope.
+        (webView.parent as? ViewGroup)?.removeView(webView)
+        webView.destroy()
+        super.onDestroy()
     }
 }
-
-@Composable
-private fun stringResource(id: Int): String =
-    androidx.compose.ui.res.stringResource(id)

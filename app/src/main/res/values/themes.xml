@@ -1,3 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Sandeshika" parent="android:Theme.Material.Light.NoActionBar" />
+    <!--
+      The WebView paints the entire interface, so the native theme only needs
+      to supply the window background behind it. It is set to the app's own
+      surface colour in both modes: a white flash before the page paints, or a
+      white bar under a dark keyboard, is the tell that gives away a wrapped
+      web app.
+    -->
+    <style name="Theme.Sandeshika" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:windowBackground">@color/window_bg</item>
+        <item name="android:statusBarColor">@color/brand</item>
+        <item name="android:navigationBarColor">@color/window_bg</item>
+    </style>
 </resources>

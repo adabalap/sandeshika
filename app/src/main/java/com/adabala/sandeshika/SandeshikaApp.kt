@@ -1,33 +1,30 @@
 package com.adabala.sandeshika
 
 import android.app.Application
-import com.adabala.sandeshika.config.AppConfig
-import com.adabala.sandeshika.ingest.IngestWorker
-import com.adabala.sandeshika.ingest.SmsObserver
-import com.adabala.sandeshika.ingest.SmsReader
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
+import android.os.Build
+import android.webkit.WebView
 
 class SandeshikaApp : Application() {
-
-    lateinit var observer: SmsObserver
-        private set
-
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-
     override fun onCreate() {
         super.onCreate()
-        scope.launch {
-            val cfg = AppConfig.get(this@SandeshikaApp).snapshot()
-            observer = SmsObserver(this@SandeshikaApp, cfg.observerDebounceMs)
-            if (SmsReader(this@SandeshikaApp).canRead()) {
-                observer.register()
-                IngestWorker.schedulePeriodicSweep(
-                    this@SandeshikaApp, BuildConfig.INGEST_SWEEP_MINUTES
-                )
-            }
+
+        /*
+         * Debug builds only. WebView contents debugging exposes the page to
+         * anything that can reach the device over adb — including the running
+         * app's own state — so it must never be on in a release the user
+         * installs.
+         */
+        if (BuildConfig.DEBUG) WebView.setWebContentsDebuggingEnabled(true)
+
+        /*
+         * Multi-process WebView needs a distinct data directory per process,
+         * or the second process to start throws on first use. Only one process
+         * uses a WebView here, but naming it is cheap insurance against a
+         * future service or a crash-reporting library that starts one.
+         */
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val process = getProcessName()
+            if (process != packageName) WebView.setDataDirectorySuffix(process)
         }
     }
 }

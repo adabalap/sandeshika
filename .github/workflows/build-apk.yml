@@ -1,0 +1,175 @@
+name: Build Sandeshika APK
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      SANDESHIKA_KEYSTORE_BASE64: ${{ secrets.SANDESHIKA_KEYSTORE_BASE64 }}
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The project may sit at the repo root, or one directory down if the
+      # release archive was extracted without flattening. Locate the Gradle
+      # build once rather than failing with "does not contain a Gradle build",
+      # which reads like a broken project but is only a path problem.
+      - name: Locate the Gradle build
+        id: root
+        run: |
+          set -euo pipefail
+          if [ -f settings.gradle.kts ]; then
+            DIR="."
+          else
+            DIR=$(find . -maxdepth 3 -name settings.gradle.kts -not -path "*/build/*" \
+                  -printf '%h\n' | head -1 || true)
+          fi
+          if [ -z "${DIR:-}" ]; then
+            echo "::error::No settings.gradle.kts anywhere in this repository."
+            echo "Extract the release archive so that settings.gradle.kts, app/ and gradlew"
+            echo "sit at the REPOSITORY ROOT, not inside a sandeshika-apk/ subfolder."
+            find . -maxdepth 3 -type d -not -path "*/.git*" | head -20
+            exit 1
+          fi
+          echo "dir=$DIR" >> "$GITHUB_OUTPUT"
+          echo "Gradle build found in: $DIR"
+
+      # The bridge is reached by NAME from JavaScript, so a renamed or removed
+      # @JavascriptInterface method fails only at runtime. Check the contract.
+      - name: Verify JS/native bridge contract
+        working-directory: ${{ steps.root.outputs.dir }}
+        run: |
+          set -euo pipefail
+          KT=app/src/main/java/com/adabala/sandeshika/MedhaBridge.kt
+          for m in getConfig saveSettings clearSettings request; do
+            grep -q "fun $m(" "$KT" || { echo "::error::MedhaBridge is missing $m()"; exit 1; }
+            grep -q "@JavascriptInterface" "$KT" || { echo "::error::missing @JavascriptInterface"; exit 1; }
+            grep -q "AndroidMedha\[fn\]\|AndroidMedha\.$m" app/src/main/assets/web/js/bridge.js \
+              || echo "note: $m reached dynamically"
+          done
+          grep -q "window.__medhaResolve" app/src/main/assets/web/js/bridge.js
+          grep -q "__medhaResolve" "$KT"
+          echo "bridge contract OK"
+
+      - name: Check for missing declarations
+        working-directory: ${{ steps.root.outputs.dir }}
+        run: python3 tools/check_symbols.py app/src/main/java
+
+      - name: Check lifecycle overrides
+        working-directory: ${{ steps.root.outputs.dir }}
+        run: python3 tools/check_overrides.py app/src
+
+      # api.js exists in two variants (Flask proxy vs native bridge). Copying
+      # the wrong one over the other compiles fine and fails only at runtime.
+      - name: Guard the Transport wiring
+        working-directory: ${{ steps.root.outputs.dir }}
+        run: |
+          set -euo pipefail
+          API=app/src/main/assets/web/js/api.js
+          grep -q "Transport.api(path" "$API" \
+            || { echo "::error::$API is not wired to Transport — the Flask copy was synced over it"; exit 1; }
+          grep -q "fetch(MEDHA + path" "$API" \
+            && { echo "::error::$API still calls fetch() directly; it must go through Transport"; exit 1; }
+          echo "Transport wiring OK"
+
+      # index.html exists in two copies (Flask and APK). A view added to one and
+      # not the other fails only when the user taps that tab.
+      - name: Check the APK page matches app.js
+        working-directory: ${{ steps.root.outputs.dir }}
+        run: |
+          node -e "
+          const fs=require('fs');
+          const h=fs.readFileSync('app/src/main/assets/web/index.html','utf8');
+          const j=fs.readFileSync('app/src/main/assets/web/js/app.js','utf8');
+          const ids=new Set([...h.matchAll(/id=\"([\w-]+)\"/g)].map(m=>m[1]));
+          const used=new Set([...j.matchAll(/\\\\$\('#([\w-]+)'\)/g)].map(m=>m[1]));
+          const miss=[...used].filter(u=>!ids.has(u));
+          if(miss.length){console.error('::error::index.html is missing: '+miss.join(', '));process.exit(1);}
+          console.log('OK '+used.size+' element ids resolve');"
+
+      - name: Parser and bridge tests
+        working-directory: ${{ steps.root.outputs.dir }}
+        run: |
+          node tests/realcorpus.test.js
+          node tests/organizer.test.js
+          node tests/bridge.test.js
+
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: android-actions/setup-android@v3
+
+      - name: Ensure Gradle wrapper
+        working-directory: ${{ steps.root.outputs.dir }}
+        run: |
+          set -euo pipefail
+          if [ -f ./gradlew ] && [ -f gradle/wrapper/gradle-wrapper.jar ]; then
+            echo "Wrapper is committed (good)."
+          else
+            TMP="$(mktemp -d)"
+            ( cd "$TMP" && gradle wrapper --gradle-version 8.9 -q )
+            mkdir -p gradle/wrapper
+            cp "$TMP/gradlew" "$TMP/gradlew.bat" ./
+            cp "$TMP/gradle/wrapper/gradle-wrapper.jar" gradle/wrapper/
+            rm -rf "$TMP"
+          fi
+          chmod +x ./gradlew
+
+      - name: Build debug APK
+        working-directory: ${{ steps.root.outputs.dir }}
+        run: ./gradlew assembleDebug --stacktrace --no-daemon
+
+      - name: Decode keystore
+        id: signing
+        if: env.SANDESHIKA_KEYSTORE_BASE64 != ''
+        run: |
+          echo "$SANDESHIKA_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/sandeshika.jks"
+          echo "available=true" >> "$GITHUB_OUTPUT"
+
+      - name: Build release APK
+        if: steps.signing.outputs.available == 'true'
+        working-directory: ${{ steps.root.outputs.dir }}
+        env:
+          SANDESHIKA_KEYSTORE_PATH: ${{ runner.temp }}/sandeshika.jks
+          SANDESHIKA_KEYSTORE_PASSWORD: ${{ secrets.SANDESHIKA_KEYSTORE_PASSWORD }}
+          SANDESHIKA_KEY_ALIAS: ${{ secrets.SANDESHIKA_KEY_ALIAS }}
+          SANDESHIKA_KEY_PASSWORD: ${{ secrets.SANDESHIKA_KEY_PASSWORD }}
+        run: ./gradlew assembleRelease --stacktrace --no-daemon
+
+      - name: Name the APKs
+        working-directory: ${{ steps.root.outputs.dir }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          V=$(grep -oE 'versionName = "[^"]+"' app/build.gradle.kts | head -1 | cut -d'"' -f2)
+          SHA=$(git rev-parse --short HEAD)
+          for BT in debug release; do
+            APK=$(ls app/build/outputs/apk/$BT/*.apk 2>/dev/null | head -1 || true)
+            [ -n "$APK" ] && cp "$APK" "dist/sandeshika-$V-$BT-$SHA.apk"
+          done
+          ls -la dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sandeshika-apk
+          path: ${{ steps.root.outputs.dir }}/dist/*.apk
+          if-no-files-found: error
+
+      - name: Publish release (tags only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.root.outputs.dir }}/dist/*.apk
+          generate_release_notes: true

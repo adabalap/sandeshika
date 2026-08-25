@@ -1,30 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!--
-      READ_SMS is the whole product. Play Protect will hard-block a sideload
-      that declares it: use `adb install -r`, which goes through the shell and
-      never shows the dialog. See README.
+      INTERNET is the only permission this app declares.
 
-      RECEIVE_SMS is deliberately ABSENT. It is the permission Play Protect
-      treats most harshly, and a ContentObserver plus the periodic sweep covers
-      the same ground for a companion app. Medha removed it for exactly this
-      reason after finding it bought nothing.
+      Sandeshika never holds READ_SMS. It asks Medha for messages over
+      loopback, and Medha is the app that holds the permission and shows the
+      user what it is doing with it. Splitting it that way means the app that
+      renders your spending has no ability to read your inbox directly, and
+      revoking Medha's access revokes it for everything at once.
 
-      There is NO INTERNET permission, and there must never be one. Loopback
-      traffic to Medha does not require it. Its absence is a claim any user can
-      verify in Settings, which is worth more than any privacy policy.
+      "Internet" here is 127.0.0.1. Android requires the permission for any
+      socket, including one that never leaves the device; the network security
+      config below is what actually constrains where it can go.
     -->
-    <uses-permission android:name="android.permission.READ_SMS" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-
-    <!-- Optional, P5. Omit for a cleaner permission story if replies deep-link
-         to the stock messaging app instead. -->
-    <uses-permission android:name="android.permission.READ_CONTACTS"
-        tools:node="remove" />
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <application
         android:name=".SandeshikaApp"
@@ -33,28 +23,20 @@
         android:fullBackupContent="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:supportsRtl="true"
-        android:enableOnBackInvokedCallback="true"
         android:theme="@style/Theme.Sandeshika">
 
         <activity
             android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
             android:exported="true"
-            android:windowSoftInputMode="adjustResize"
-            android:theme="@style/Theme.Sandeshika">
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-
-        <receiver
-            android:name=".ingest.BootReceiver"
-            android:exported="true"
-            android:enabled="true">
-            <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED" />
-            </intent-filter>
-        </receiver>
     </application>
 </manifest>
