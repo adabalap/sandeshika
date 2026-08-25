@@ -405,6 +405,7 @@ what it does with it. `INTERNET` is the only permission declared, and
 | Cleartext limited to loopback | Medha is plain HTTP on 127.0.0.1; everything else is denied outright |
 | Backups disabled | a financial history and that token do not belong in a cloud backup |
 | ProGuard keeps the bridge | R8 sees no Kotlin callers, strips the methods, and only the *release* build breaks |
+| Line comments in `build.gradle.kts` | Kotlin block comments **nest**, so a glob pattern inside one opens a nested comment that swallows code until a stray close sequence in a string — the parse error then lands tens of lines from the mistake |
 | `-dontwarn` for Tink's annotations | `security-crypto` pulls in Tink, whose Error Prone and JSR-305 annotations exist only at compile time; R8 halts on the missing references |
 
 ## Layout
@@ -454,6 +455,7 @@ tests/                      14 JS suites (880) + server_test.py (40)
 tools/redact.py             the same redaction, offline, for bulk corpus files
 tools/bump_version.py       moves all five version constants together
 tools/prune_stale.py        removes files an upgrade could not delete
+tools/check_kotlin_comments.py  fails when a block comment swallows code
 tools/make_manifest.py      regenerates MANIFEST.txt
 MANIFEST.txt                every file in this release
 ```

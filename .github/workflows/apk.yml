@@ -61,6 +61,13 @@ jobs:
       - name: Bridge contract
         run: node tests/native-bridge.test.js
 
+      # Kotlin block comments nest, so a glob pattern inside one swallows code
+      # until a stray close sequence in a string. Gradle reports the resulting
+      # parse error far from the real mistake; this names the line that opened
+      # it, and costs a second rather than a minute of Gradle startup.
+      - name: Kotlin comments
+        run: python3 tools/check_kotlin_comments.py
+
       - run: chmod +x gradlew
 
       - name: Assemble

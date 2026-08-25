@@ -316,6 +316,20 @@ class TestAndroidResources(unittest.TestCase):
         self.assertEqual(app_el.get(ns + "allowBackup"), "false")
         self.assertEqual(app_el.get(ns + "networkSecurityConfig"), "@xml/network_security_config")
 
+    def test_block_comments_do_not_swallow_code(self):
+        """
+        Kotlin block comments nest, so a glob pattern inside one opens a nested
+        comment; the closing delimiter shuts only the inner one and the outer
+        keeps consuming real code. Gradle then reports a parse error tens of
+        lines below the actual mistake.
+        """
+        import subprocess
+        r = subprocess.run(
+            [sys.executable, os.path.join(self.ROOT, "tools", "check_kotlin_comments.py")],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
     def test_proguard_keeps_the_javascript_bridge(self):
         rules = os.path.join(self.ROOT, "app", "proguard-rules.pro")
         with open(rules, encoding="utf-8") as fh:

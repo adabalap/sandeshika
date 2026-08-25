@@ -41,6 +41,7 @@ jobs:
       - run: pip install -r requirements.txt ruff
       - run: ruff check app.py tools/ tests/server_test.py
       - run: python3 tests/server_test.py
+      - run: python3 tools/check_kotlin_comments.py
 
       # A checkout upgraded by extracting an archive keeps every file the new
       # version deleted. Those files still get picked up by the test glob and

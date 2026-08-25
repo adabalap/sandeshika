@@ -102,6 +102,7 @@ tests/transport.test.js
 tools/CORPUS.md
 tools/REDACTION.md
 tools/bump_version.py
+tools/check_kotlin_comments.py
 tools/corpus.py
 tools/make_manifest.py
 tools/prune_stale.py
