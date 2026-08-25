@@ -179,7 +179,7 @@ suite that reports red for a correct codebase is a suite people stop believing.
 
 ```bash
 npm run check                 # lint + typecheck + all JS suites (what CI runs)
-npm test                      # 880 assertions across 14 suites
+npm test                      # 915 assertions across 14 suites
 python3 tests/server_test.py  # 34 assertions — proxy, limiter, headers
 python3 tools/redact.py --selftest
 ```
@@ -188,7 +188,7 @@ python3 tools/redact.py --selftest
 ✓ analytics · parser · organizer · model · transport · learning
 ✓ pipeline · realcorpus · shell · native-bridge · boot · e2e
 ✓ provenance · redact
-14 suites · 880 passed · 0 failed        (+ 40 Python)
+14 suites · 915 passed · 0 failed        (+ 41 Python)
 ```
 
 Each suite is a plain script that counts assertions and exits non-zero, so any
@@ -345,6 +345,31 @@ Each produces a confident, plausible, wrong number — invisible in a demo.
 - **An undefined soft key could enter the dedup set**, after which every
   keyless transaction matched the first one as a duplicate.
 
+### Found in a real 5,000-message inbox (2.2)
+
+A drift report from an actual phone surfaced four things no synthetic corpus had:
+
+- **115 UPI reversals were silently discarded.** `CREDIT_RE` carried the noun
+  `reversal` but not the past participle `reversed`, so "your UPI transaction
+  has been reversed in your account" produced no direction at all. That is money
+  that came back and never offset the spend it belonged to.
+- **A card-usage confirmation was thrown away for quoting a balance.** "Thanks
+  for using Card XXXX for INR 250 at SWIGGY … Avl Bal: INR 999" is a purchase;
+  the balance reject rule ate the whole thing because `using` was not among the
+  verbs that mark a message as transactional.
+- **The drift panel reported 94 templates, and 478 of 479 messages were noise.**
+  Dormancy notices, FASTag nags, e-mandate confirmations, statement alerts and
+  offers — all understood elsewhere in the app, all reported as though the
+  parser were broken. A signal that noisy is the same as no signal. The
+  organizer now recognises them, which also files them correctly under Updates.
+- **The redactor leaked, and over-redacted at the same time.** The account
+  holder's own name reached the report, because HDFC opens with it alone on the
+  first line where no anchored rule could see it. Five phone-number shapes,
+  wallet ids, biller numbers and long masked tails also survived. Meanwhile the
+  generic "two capitalised words" rule fired 118 times and shredded the template
+  vocabulary the report exists to convey — "Telecom Regulatory Authority of
+  India" became a pseudonym. That trade was backwards; the rule is gone.
+
 ### Found during the 2.1 hardening pass
 
 - **OTP codes survived redaction entirely.** Every high-risk identifier was
@@ -451,7 +476,7 @@ static/js/ui/
   views/                      overview, dashboard, daily, detail, transactions,
                               bills, inbox, ask, setup
 
-tests/                      14 JS suites (880) + server_test.py (40)
+tests/                      14 JS suites (915) + server_test.py (41)
 tools/redact.py             the same redaction, offline, for bulk corpus files
 tools/bump_version.py       moves all five version constants together
 tools/prune_stale.py        removes files an upgrade could not delete

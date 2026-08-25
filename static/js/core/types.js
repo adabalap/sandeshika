@@ -173,6 +173,7 @@
  * @property {string} sender
  * @property {string} reason
  * @property {string} body
+ * @property {string} [subtype] What the organizer made of it, when it saw anything.
  * @property {number} [count]
  */
 

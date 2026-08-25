@@ -58,8 +58,13 @@ const INBOX = [
   sms('AX-ICICIT', 'Convert your ICICI Bank Credit Card outstanding into easy EMIs. T&Cs apply.', at(1)),
   // a registered bank sender in a format the parser does not know: this is
   // what must reach the drift panel, redacted.
-  // Reject reason 'no-direction', which is NOT in EXPECTED_NOISE, so it counts
-  // as a template the bank changed rather than as ordinary inbox traffic.
+  /*
+   * Genuine drift: a financial sender, a reject reason outside EXPECTED_NOISE,
+   * AND wording the organizer cannot place either. Anything the organizer
+   * recognises — a bill, a service notice, an offer — is deliberately no
+   * longer reported, since that is what buried the real signal under 94
+   * entries on a live inbox.
+   */
   sms('AX-HDFCBK', 'Amt Rs.1358.00 twds HDFC Bank A/C *5261 vide Mr Gadipudi Khadri dt 10/08/26 Ref 523456789012 Call 9876543210', at(4)),
   // a bill
   sms('MD-HDFCBK', `E-Statement Generated! For HDFC Bank Credit Card 0541. Due date:${ddmmyy(at(-10))}.Total Due:Rs.12,450.Min Due:Rs.600`, at(2)),

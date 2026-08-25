@@ -375,6 +375,63 @@ eq('Rs. with spaces', P.parseAmount('Rs. 1,00,000.00 debited'), 100000);
      r.ok ? `amount=${r.txn.amount}` : `rejected ${r.reason}`);
 }
 
+// ===========================================================================
+// Templates recovered from a real 5,000-message inbox
+//
+// Each was silently discarded. The counts are how often the template appeared
+// in one person's messages — the honest measure of what the omission cost.
+// ===========================================================================
+{
+  const at = (body, address = 'AX-HDFCBK') =>
+    P.parse({ id: 1, body, date: Date.now(), address });
+
+  // 115 occurrences. CREDIT_RE carried the noun "reversal" but not the past
+  // participle "reversed", so every one produced no direction at all and was
+  // thrown away: money that came back and never offset the spend it belonged to.
+  {
+    const r = at('HDFC Bank: Your UPI transaction of Rs. 450.00 has been reversed '
+      + 'in your account due to technical problem (UPI Ref no. 214859673021)');
+    ok('a UPI reversal parses', r.ok, r.ok ? '' : r.reason);
+    if (r.ok) {
+      eq('a reversal is a credit', r.txn.direction, 'credit');
+      eq('a reversal is a refund, not income', r.txn.kind, 'refund');
+      eq('the reversed amount is exact', r.txn.amount, 450);
+    }
+  }
+
+  // 11 occurrences. A card-usage confirmation quotes the balance left
+  // afterwards, and the balance reject rule discarded the whole purchase.
+  {
+    const r = at('Thanks for using HDFC Bank Card XXXX0541 for INR 250 at SWIGGY '
+      + 'on 04-OCT-20 08:12 PM. Avl Bal: INR 999.9. Not You ? Call 9122616061');
+    ok('a card-usage confirmation parses', r.ok, r.ok ? '' : r.reason);
+    if (r.ok) {
+      eq('it is a debit', r.txn.direction, 'debit');
+      eq('it is spending', r.txn.kind, 'expense');
+      eq('the purchase amount is taken, not the balance', r.txn.amount, 250);
+    }
+  }
+
+  // What these changes must NOT have loosened.
+  {
+    const declined = at('Declined!\n Rs.1500.00 on HDFC Bank Credit Card xx0541.\n Reason: Online use off.');
+    ok('a declined charge is still rejected', !declined.ok, JSON.stringify(declined.txn || {}));
+
+    const future = at('Rs.500 will be reversed to your account within 3 working days');
+    ok('a future-tense reversal is still rejected', !future.ok, JSON.stringify(future.txn || {}));
+
+    const bal = at('Avl bal in a/c XX1234 is Rs.45,678.90 as on 05-08-25');
+    ok('a plain balance advisory is still rejected', !bal.ok, JSON.stringify(bal.txn || {}));
+
+    const lowbal = at('Low Balance Alert!On HDFC Bank NETC FASTag wallet id 19000009944770 '
+      + 'Avl. Bal: Rs. 84.50. Reload: https://x.co/y');
+    ok('a FASTag low-balance nag is still rejected', !lowbal.ok, JSON.stringify(lowbal.txn || {}));
+
+    const mandate = at('AutoPay (E-mandate) Active!\nFor OpenAILLC\nAmt:USD23.60\nFreq:Adhoc');
+    ok('an e-mandate activation is still rejected', !mandate.ok, JSON.stringify(mandate.txn || {}));
+  }
+}
+
 console.log(`\n${'-'.repeat(50)}`);
 console.log(`passed=${pass}  failed=${fail}`);
 if (failures.length) {

@@ -57,7 +57,7 @@ log = logging.getLogger("sandeshika")
 logging.getLogger("werkzeug").setLevel(logging.WARNING)
 
 APP_NAME = "Sandeshika"
-APP_VERSION = "2.1.0"  # kept in step with package.json by tests/shell.test.js
+APP_VERSION = "2.2.0"  # kept in step with package.json by tests/shell.test.js
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATIC = os.path.join(HERE, "static")
 

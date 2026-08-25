@@ -119,6 +119,13 @@ pay payment app link click visit valid till off get now new old yesterday today
 track view know check enable disable restore avoid redeem reset activate
 download register confirm verify continue learn report unblock dispute add added
 make info help support branch ifsc cheque deposit withdrawal interest emi loan
+stop start quit unsub resume active inactive yes no ok done fail failed success
+dormant kyc ckyc rekyc fastag netc wallet reload autopay smartpay mycards imobile
+netbanking mobilebanking upi vpa qr atm pos otp pin mpin cvv nach ecs mandate
+declined reversed reversal refund cashback reward statement generated overdue
+telecom regulatory authority india npci rbi trai uidai government dept department
+notice alert attention important update reminder congratulations welcome thanks
+regards team customer care relationship manager rm nominee nomination
 `.trim().split(/\s+/));
 
 /** @param {string} s */
@@ -177,7 +184,16 @@ export function redact(input) {
   // ---- highest-risk identifiers first --------------------------------------
   sub(/\b[\w.+-]+@[\w-]+\.[\w.]{2,}\b/g, 'EMAIL_REDACTED', 'email');
   sub(/\b[A-Z]{5}\d{4}[A-Z]\b/g, 'PANXXXXXXXXX', 'pan');
-  sub(/\b\d{4}\s?\d{4}\s?\d{4}\b/g, 'AADHAAR_REDACTED', 'aadhaar');
+  /*
+   * Aadhaar only in its written form (4-4-4 with separators) or next to the
+   * word. A bare twelve-digit run is far more often a UPI reference or a
+   * biller id, and labelling those AADHAAR_REDACTED was wrong twice over: it
+   * mislabelled the field AND destroyed the digit-count shape that a parser
+   * bug report needs.
+   */
+  sub(/\b\d{4}[\s-]\d{4}[\s-]\d{4}\b/g, 'AADHAAR_REDACTED', 'aadhaar');
+  sub(/\b(aadhaar|uidai)\b([^\d\n]{0,20})(\d{8,12})/gi,
+    (_m, w, gap) => `${w}${gap}AADHAAR_REDACTED`, 'aadhaar');
   sub(/\b[A-Z]{4}0[A-Z0-9]{6}\b/g, 'IFSC0XXXXXX', 'ifsc');
   // 13-19 digit runs are card numbers. Done before the generic digit rules.
   sub(/\b\d{13,19}\b/g, (m) => '9'.repeat(m.length), 'card_or_long_id');
@@ -203,8 +219,21 @@ export function redact(input) {
     (_m, code, tail) => '9'.repeat(code.length) + tail, 'otp');
 
   // ---- phone numbers -------------------------------------------------------
-  sub(/(?<!\d)(?:\+91[-\s]?)?[6-9]\d{9}(?!\d)/g, '9999999999', 'phone');
+  /*
+   * Every shape a bank actually uses, learned from a real inbox where the
+   * previous rules leaked six of them: a 91-prefixed number without the plus
+   * (9122616061), an STD landline with spaces around the hyphen
+   * (080 - 68111518), eleven-digit toll-free (18602585000), a landline with a
+   * leading zero (01140132102), and SMS shortcodes (5676766).
+   */
   sub(/\b1800[-\s]?\d{3,8}\b/g, '1800XXXXXX', 'helpline');
+  sub(/\b18[0-9]{2}[-\s]?\d{6,8}\b/g, '1800XXXXXX', 'helpline');
+  sub(/(?<!\d)\+?91[-\s]?[6-9]\d{9}(?!\d)/g, '919999999999', 'phone');
+  sub(/(?<!\d)0\d{2,4}[-\s]*\d{6,8}(?!\d)/g, '0XXXXXXXXXX', 'phone');
+  sub(/(?<!\d)(?:\+91[-\s]?)?[6-9]\d{9}(?!\d)/g, '9999999999', 'phone');
+  // Shortcodes appear next to an instruction to message or call them.
+  sub(/\b(to|on|at)\s+(\d{5,8})(?!\d)/gi,
+    (m, w, num) => (/^\d+$/.test(num) ? `${w} ${'9'.repeat(num.length)}` : m), 'shortcode');
 
   // ---- account and card tails: keep the masking style, blank the digits ----
   sub(
@@ -221,6 +250,16 @@ export function redact(input) {
     'reference',
   );
   sub(/\b(?:IHL|MHL|SR)[_A-Z0-9]{6,}\b/g, 'APPLICATION_ID', 'application_id');
+
+  /*
+   * Anything still carrying seven or more consecutive digits: wallet ids, bill
+   * numbers, unlabelled reference numbers, the tail of a long masked account.
+   * Replaced digit-for-digit so the FORMAT survives — which is the whole
+   * reason a drift report is worth sending — while the value does not. This
+   * runs late, after every labelled rule has had its turn.
+   */
+  sub(/(?<![\dX*x])\d{7,}(?![\d])/g, (m) => '9'.repeat(m.length), 'long_id');
+  sub(/\b([Xx*]{4,})(\d{2,6})\b/g, (_m, mask, d) => mask + '9'.repeat(d.length), 'masked_tail');
 
   // ---- URLs: keep that a link was present, drop it. Paths carry tokens. ----
   sub(/https?:\/\/\S+/g, 'https://REDACTED.LINK/x', 'url');
@@ -282,17 +321,38 @@ export function redact(input) {
     (m) => (looksLikeName(m) ? tag('PERSON', m) : m), 'name_caps');
 
   /*
-   * Last resort: two or more consecutive Capitalised words that survived every
-   * rule above and are not in NOT_NAMES.
+   * A NAME ON ITS OWN LINE, usually the salutation.
    *
-   * This is the loosest rule here and it will occasionally pseudonymise a
-   * merchant. For a report the user is about to send to a stranger that is the
-   * right way round to be wrong: a merchant reduced to MERCHANT_a3f1 costs the
-   * parser author a little context, while a surviving payee name costs the user
-   * their privacy. Anchored rules run first precisely so this one rarely fires.
+   * This is how the user's own name reaches a report. HDFC opens with the
+   * account holder's name and nothing else — "Adabalaphani,\nGood news!" —
+   * which no preposition-anchored or title-anchored rule can see. It leaked
+   * through every one of them in a real 5,000-message inbox.
    */
-  sub(/\b([A-Z][a-z]{1,}(?:\s+[A-Z][a-z]{1,}){1,4})\b/g,
-    (m) => (looksLikeName(m) ? tag('PERSON', m) : m), 'name_capitalised');
+  t = t.replace(/^([A-Z][A-Za-z.'-]{2,30}(?:\s+[A-Z][A-Za-z.'-]{1,30}){0,3})\s*,\s*$/gm,
+    (m, name) => {
+      if (!looksLikeName(name)) return m;
+      counts.name_salutation = (counts.name_salutation || 0) + 1;
+      return `${tag('PERSON', name)},`;
+    });
+
+  /*
+   * The generic "two capitalised words in a row" rule that used to sit here is
+   * GONE.
+   *
+   * On a real inbox it fired 118 times — more than every other category
+   * combined — and what it replaced was almost entirely template vocabulary:
+   * "Telecom Regulatory Authority of India" became PERSON_4be3, "Login PIN"
+   * became PERSON_172d, "Statement Generated" became a pseudonym. The report
+   * exists so someone can read the SHAPE of a message and fix the parser, and
+   * that rule shredded exactly the words that carry the shape while catching
+   * few real names the anchored rules had missed.
+   *
+   * The trade was backwards. Anchored rules — titles, salutations, "To X",
+   * "from X", "Dear X" — plus the all-caps payee rule catch names where names
+   * actually appear in bank SMS. verify() re-scans the output, and the panel
+   * tells the user to read it before sending, because no regex catches every
+   * name and pretending otherwise is worse than saying so.
+   */
 
   return { text: t, counts, warnings: verify(t) };
 }

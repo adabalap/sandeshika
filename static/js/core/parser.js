@@ -82,7 +82,11 @@ function isFinancialSender(address) {
 const REJECT_PRE = [
   { id: 'otp',        re: /\b(otp|one[\s-]?time\s*(password|pin)|verification code|do not share)\b/i },
   { id: 'promo',      re: /\b(offer|cashback up to|congratulations|win |sale |discount|apply now|click here|t&c apply|unsubscribe|limited period)\b/i },
-  { id: 'balance',    re: /^(?=.*\b(avl|available|closing|a\/c)\s*(bal|balance)\b)(?!.*\b(debited|credited|spent|withdrawn|paid|received|sent)\b)/i },
+  // `for using` is in the exemption list because a card-usage confirmation
+  // quotes the balance left afterwards — "Thanks for using Card XXXX for INR
+  // 250 at SWIGGY ... Avl Bal: INR 999" is a purchase, and without it the
+  // balance rule discarded the entire transaction.
+  { id: 'balance',    re: /^(?=.*\b(avl|available|closing|a\/c)\s*(bal|balance)\b)(?!.*\b(debited|credited|spent|withdrawn|paid|received|sent|for using)\b)/i },
   // Lookahead must scan the WHOLE message, not just what follows the phrase.
   // "Spent Rs.500 on Card 1234. Avbl Credit Limit: Rs.45,000" is a real
   // purchase whose spend verb appears BEFORE the limit phrase; the previous
@@ -244,8 +248,17 @@ function parseAmount(text) {
  * single largest gap: hundreds of genuine payments were being discarded as
  * "no-direction" because the list only had "sent to".
  */
-const DEBIT_RE  = /\b(debited|spent|withdrawn|paid|purchase|deducted|sent|transferred to|txn of|charged|processed payment of|payment of|done for|recharged with|loaded with)\b/i;
-const CREDIT_RE = /\b(credited|received|deposited|refund(ed)?|reversal|cashback of|added to)\b/i;
+const DEBIT_RE  = /\b(debited|spent|withdrawn|paid|purchase|deducted|sent|transferred to|txn of|charged|processed payment of|payment of|done for|recharged with|loaded with|thanks? (you )?for using)\b/i;
+/*
+ * `reversed` was missing while `reversal` was present, so "your UPI transaction
+ * has been reversed in your account" produced no direction at all. In one real
+ * inbox that single omission discarded 115 genuine refunds — money that had
+ * come back and was never credited against the spend it offset.
+ *
+ * "Thanks for using <card> for INR X at <merchant>" is a purchase confirmation
+ * with no spend verb in it. It is how card networks word a completed charge.
+ */
+const CREDIT_RE = /\b(credited|received|deposited|refund(ed)?|revers(al|ed)|cashback of|added to)\b/i;
 
 function parseDirection(text) {
   const d = DEBIT_RE.test(text);

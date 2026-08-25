@@ -15,6 +15,7 @@
  */
 
 import * as P from '../core/parser.js';
+import * as O from '../core/organizer.js';
 import { api, Keys, putMany, loadTransactions, Store } from './client.js';
 import { resolveCategory, primeCategoryCache } from './categories.js';
 
@@ -28,6 +29,14 @@ const CATCHUP_LIMIT = 100;
 
 /** Fields whose change a user would actually notice on screen. */
 const MATERIAL_FIELDS = ['amount', 'kind', 'category', 'merchant', 'date', 'currency'];
+
+/**
+ * The organizer's catch-all buckets: it placed the message nowhere specific.
+ * Every other subtype — bill, service, offer, travel, delivery, otp — means it
+ * WAS recognised, just not as a transaction, and reporting those as broken
+ * templates is what turned this signal into 94 entries of noise.
+ */
+const UNRECOGNISED_SUBTYPES = new Set(['bank-other', 'other']);
 
 /**
  * Keeps every decision the user made, while accepting the new parse for
@@ -85,12 +94,33 @@ export async function ingestPage(messages, ctx) {
 
     if (!r.ok) {
       rejected++;
-      // TEMPLATE DRIFT SIGNAL: a message from a registered bank sender that we
-      // could not parse probably means the bank changed its format. Ordinary
-      // noise (OTPs, promos) is expected and deliberately not counted here,
-      // otherwise the signal is buried under routine traffic.
+      /*
+       * TEMPLATE DRIFT SIGNAL: a message from a registered bank sender that we
+       * could not parse, and that is not something else we already understand.
+       *
+       * The reject reason alone is far too coarse. On a real 5,000-message
+       * inbox this produced 94 "unrecognised templates", of which the large
+       * majority were dormancy notices, FASTag balance nags, e-mandate
+       * confirmations, statement alerts and promotional offers — all correctly
+       * identified as non-transactions elsewhere in the app, and all reported
+       * here as though the parser were broken. A signal that noisy is one
+       * nobody reads, which is the same as having no signal at all.
+       *
+       * So a message only counts as drift if the ORGANIZER recognised nothing
+       * specific about it either. A bill, a service notice, an offer, a
+       * delivery update — all understood, just not as transactions. Only the
+       * catch-all subtypes mean genuinely unfamiliar wording from a bank.
+       */
       if (drift && P.isFinancialSender(m.address) && !P.EXPECTED_NOISE.includes(r.reason)) {
-        drift.push({ sender: m.address, reason: r.reason, body: String(m.body).slice(0, 160) });
+        const cls = O.classify(m);
+        if (UNRECOGNISED_SUBTYPES.has(cls.subtype)) {
+          drift.push({
+            sender: m.address,
+            reason: r.reason,
+            subtype: cls.subtype,
+            body: String(m.body).slice(0, 160),
+          });
+        }
       }
       continue;
     }

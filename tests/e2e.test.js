@@ -27,6 +27,7 @@
  */
 
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -108,7 +109,10 @@ try {
   const cfg = await realFetch(`${ORIGIN}/config.json`).then((r) => r.json());
   ok('the server reports mock mode', cfg.mock === true);
   ok('the server reports installable on localhost', cfg.installable === true);
-  ok('the served build matches package.json', cfg.version === '2.1.0', cfg.version);
+  // Read, not hardcoded: a literal here means every release bumps a test.
+  const pkgVersion = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
+  ok('the served build matches package.json', cfg.version === pkgVersion,
+    `served ${cfg.version}, package.json ${pkgVersion}`);
 
   const st = await api('/connectors/sms/status');
   ok('the SMS connector is reachable through the proxy', st.canRead === true);

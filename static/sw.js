@@ -13,7 +13,7 @@
  * server answers 304 and nothing is transferred — and guarantees the code on
  * screen is the code that was shipped. Offline still works from the cache.
  */
-const VERSION = '2.1.0';
+const VERSION = '2.2.0';
 const CACHE = `sandeshika-${VERSION}`;
 
 /*

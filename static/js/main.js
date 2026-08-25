@@ -31,7 +31,7 @@ import { renderCustomCats, renderImportHint, renderDriftList } from './ui/views/
 import { ask } from './ui/views/ask.js';
 
 /** Bumped with every release; compared against the server to spot a stale cache. */
-const BUILD = '2.1.0';
+const BUILD = '2.2.0';
 
 // ---------------------------------------------------------------------------
 // Rendering

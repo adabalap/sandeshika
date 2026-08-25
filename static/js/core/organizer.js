@@ -77,6 +77,18 @@ const PROMO_RE = [
 
 // Bank service notices: not promotions, not transactions. Users want these
 // out of the way but not filed as junk.
+/*
+ * Operational notices from a bank: not spending, not a bill, not marketing.
+ *
+ * The lower group was added after a real 5,000-message inbox reported 94
+ * "unrecognised bank templates", of which these were the bulk. Every one is
+ * something the app understands perfectly well and simply is not a
+ * transaction — reporting them as broken parsing buried the handful of
+ * messages that genuinely were.
+ *
+ * Recognising them properly also files them correctly under Updates in the
+ * inbox view, instead of leaving them in the unlabelled remainder.
+ */
 const SERVICE_RE = [
   /\b(scheduled maintenance|will be unavailable|services (will be )?offline)\b/i,
   /\b(re-?kyc|ckyc|address updation|pin has been|has been (reactivated|generated))\b/i,
@@ -84,6 +96,32 @@ const SERVICE_RE = [
   /\b(payee|beneficiary)\b.{0,30}\b(added|registered)\b/i,
   /\bmandate\b.{0,30}\b(set|cancelled|registered|failed)\b/i,
   /\bbal(ance)? in\b.{0,40}\b(gone below|minimum limit)\b/i,
+
+  // Dormancy and reactivation.
+  /\b(is dormant|account is inactive|wallet is inactive|reactivate|dormant account)\b/i,
+
+  // Low-balance and top-up nags, including FASTag and wallets.
+  /\b(low balance alert|avl\.? bal|please recharge|reload:|add money immediately)\b/i,
+  /\bfastag\b/i,
+
+  // Autopay and standing-instruction lifecycle, including the active notice
+  // that is not itself a payment.
+  /\b(autopay|e-?mandate|standing instruction)\b.{0,40}\b(active|failed|unable|registered|created|cancelled|revoked)\b/i,
+  /\bunable to (auto ?pay|process autopay|debit)\b/i,
+
+  // A declined or failed attempt: no money moved.
+  /^declined\b|\b(declined|has been declined|could not be processed|transaction failed)\b/i,
+
+  // Card controls and limits.
+  /\b(card usage limits|usage settings|contactless (facility|usage)|enable at mycards|international transactions)\b/i,
+  /\b(limit is rs|transaction limit|withdraw cash up to)\b/i,
+
+  // Regulatory and informational notices.
+  /\b(trai|rbi guidelines|npci guidelines|as per (rbi|npci|trai)|official and legitimate)\b/i,
+
+  // Delivery of an instrument, and statement-availability notices that carry
+  // no due amount of their own.
+  /\b(card delivery|out for delivery|is scheduled|awb)\b/i,
 ];
 
 const any = (res, t) => res.some((r) => r.test(t));

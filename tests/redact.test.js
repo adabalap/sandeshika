@@ -224,6 +224,62 @@ const r = (s) => redact(s).text;
   ok('an empty report is still well-formed', empty.text.includes('0 templates'), empty.text);
 }
 
+// ===========================================================================
+// 9. Regressions from a real 5,000-message inbox
+//
+// Every case below leaked, or over-redacted, in a report generated from an
+// actual phone. They are the reason the name rules were rewritten.
+// ===========================================================================
+{
+  // THE LEAK THAT MATTERED: HDFC opens with the account holder's name alone on
+  // the first line. No preposition-anchored or title-anchored rule can see it.
+  const salutation = r('Adabalaphani,\nGood news!\nYou can avail HDFC Bank Loan on CreditCard No. xx0541');
+  gone("the user's own name in a salutation", salutation, 'Adabalaphani');
+  ok('and it becomes a pseudonym', /PERSON_[0-9a-f]{4},/.test(salutation), salutation);
+
+  // Telephone shapes that all survived the first pass.
+  gone('a 91-prefixed number without a plus', r('Not You ? Call 9122616061'), '9122616061');
+  gone('an STD landline with spaced hyphen', r('Contact your RM @ 080 - 68111518.'), '68111518');
+  gone('an eleven-digit toll-free', r('call at 18602585000 or download'), '18602585000');
+  gone('a landline with a leading zero', r('To vote call on 01140132102.'), '01140132102');
+  gone('an SMS shortcode', r('To opt out, SMS STOP to 5676766 in 5 days'), '5676766');
+
+  // Unlabelled long identifiers.
+  gone('a FASTag wallet id', r('FASTag wallet id 19000009944770 Avl. Bal: Rs. 84.50'), '19000009944770');
+  gone('a biller bill number', r('TSSPDCL Bill 101837804 cannot be AutoPaid'), '101837804');
+  gone('the tail of a long masked account',
+    r('Your HDFC Bank A/c XXXXXXXXXX9601 is Dormant.'), '9601');
+
+  // A twelve-digit UPI reference is NOT an Aadhaar number. Labelling it as one
+  // was wrong twice: the wrong field name, and the digit-count shape — the
+  // thing a parser bug report is for — destroyed.
+  const ref = r('UPI transaction reversed (UPI Ref no. 214859673021)');
+  gone('the reference value is replaced', ref, '214859673021');
+  ok('but it is not mislabelled as an Aadhaar', !ref.includes('AADHAAR'), ref);
+  ok('and its length survives', /999999999999/.test(ref), ref);
+
+  ok('a real Aadhaar in written form is still caught',
+    r('Aadhaar 1234 5678 9012 seeded').includes('AADHAAR_REDACTED'));
+
+  // OVER-REDACTION. The generic capitalised-run rule fired 118 times on one
+  // inbox and shredded the template vocabulary the report exists to convey.
+  const trai = r('This is as per the Telecom Regulatory Authority of India (TRAI) guidelines.');
+  kept('a regulator name survives', trai, 'Telecom Regulatory Authority of India');
+  ok('no pseudonym is invented for it', !/PERSON_/.test(trai), trai);
+
+  const dormant = r('Attention! Your HDFC Bank A/c is Dormant. Please visit your nearest HDFC Branch with valid KYC documents');
+  kept('service vocabulary survives', dormant, 'Dormant');
+  kept('KYC survives', dormant, 'KYC');
+  ok('no pseudonym in a dormancy notice', !/PERSON_/.test(dormant), dormant);
+
+  const declined = r('Declined! Rs.1500.00 on HDFC Bank Credit Card xx0541. Reason: Online use off.');
+  kept('the rejection keyword survives', declined, 'Declined');
+  ok('no pseudonym in a decline notice', !/PERSON_/.test(declined), declined);
+
+  const stop = r('To opt out, SMS STOP to 5676766 in 5 days');
+  kept('an SMS command survives', stop, 'SMS STOP');
+}
+
 console.log('\n' + '-'.repeat(50));
 if (failures.length) console.log(failures.join('\n'));
 console.log(`passed=${pass}  failed=${fail}`);
