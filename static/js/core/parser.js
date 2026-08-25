@@ -41,6 +41,51 @@ function normaliseSender(address) {
     .replace(/[^A-Z0-9]/g, '');
 }
 
+/**
+ * A readable merchant name taken from the DLT sender header.
+ *
+ * WHY THIS EXISTS
+ *
+ * On a real inbox 1,165 transactions landed in the review queue, and almost all
+ * of them for the same reason: the body named no merchant, so confidence fell
+ * to 0.4 and the row was excluded from every total until a human confirmed it
+ * one at a time. But the sender header names the merchant perfectly well —
+ * AD-EPFOHO, VM-MYNTRA, VM-TSSPDC, VM-REDBUS. Throwing that away and then
+ * asking the user to supply it by hand was the single largest source of
+ * unusable output in the app.
+ *
+ * A BANK sender is deliberately excluded: money leaving an HDFC account is not
+ * a payment to HDFC, and filling the merchant in with the bank's name would be
+ * confidently wrong rather than merely unknown.
+ *
+ * @param {string|null} address
+ * @returns {string|null}
+ */
+function senderMerchant(address) {
+  const id = normaliseSender(address);
+  if (!id || senderBank(address)) return null;
+  // DLT headers are 6 alphanumerics; anything shorter is a shortcode, and a
+  // numeric header is a person, not a business.
+  if (!/^[A-Z][A-Z0-9]{2,9}$/.test(id)) return null;
+  return (SENDER_BRANDS[id] || id.toLowerCase());
+}
+
+/**
+ * Headers whose expansion is not obvious from the letters alone. Everything
+ * else falls back to the header itself, lowercased, which is already a usable
+ * label and groups correctly.
+ */
+const SENDER_BRANDS = {
+  EPFOHO: 'epfo', EPFOIN: 'epfo',
+  TSSPDC: 'tsspdcl', APSPDC: 'apspdcl', BESCOM: 'bescom',
+  REDBUS: 'redbus', IRCTCI: 'irctc', MMYTRP: 'makemytrip',
+  MYNTRA: 'myntra', AJIOIN: 'ajio', FKRTIN: 'flipkart', AMAZON: 'amazon',
+  SWIGGY: 'swiggy', ZOMATO: 'zomato', BLNKIT: 'blinkit', ZEPTONW: 'zepto',
+  ICICIP: 'icici prudential', HDFCLIFE: 'hdfc life', LICIND: 'lic',
+  JIOPAY: 'jio', AIRTEL: 'airtel', VODAFN: 'vi',
+  ACTFBR: 'act fibernet', BSNLIN: 'bsnl',
+};
+
 function senderBank(address) {
   const id = normaliseSender(address);
   if (BANK_IDS[id]) return BANK_IDS[id];
@@ -180,6 +225,11 @@ const INTERNAL_RE = new RegExp([
   // to another pocket of the user's own, so counting the debit as spending and
   // the credit as income double-counts it in both directions.
   String.raw`\bfastag\b`,
+  // Retirement and provident-fund contributions: the user's own money moving
+  // into the user's own pocket. Counting an EPF credit as income overstates
+  // earnings every month it lands.
+  String.raw`\b(epf|epfo|provident fund|ppf|nps)\b.{0,30}\bcontribution\b`,
+  String.raw`\bcontribution\b.{0,30}\b(epf|epfo|provident fund|ppf|nps|uan)\b`,
   String.raw`\bnetc\b`,
   String.raw`\bmetro (card|smart ?card)\b.{0,20}\b(recharg|top ?up|load)`,
   // Any wallet or prepaid instrument being loaded.
@@ -554,8 +604,11 @@ function parse(sms) {
     foreignAmount: foreign ? foreign.amount : null,
     foreignCurrency: foreign ? foreign.currency : null,
     account: parseAccount(text),
-    merchant: m ? m.name : null,
-    merchantQuality: m ? m.quality : null,
+    merchant: m ? m.name : senderMerchant(sms.address),
+    // 'sender' records that the name came from the DLT header rather than the
+    // message body: good enough to total and to categorise, but worth knowing
+    // when a category rule misfires.
+    merchantQuality: m ? m.quality : (senderMerchant(sms.address) ? 'sender' : null),
     ref: parseRef(text),
     channel: parseChannel(text),
     date: parseDate(text, sms.date),
@@ -570,8 +623,18 @@ function parse(sms) {
 
   // kind drives the analytics, not `direction`. Spend, refunds, income and
   // internal movement have to be told apart or every total is wrong.
-  txn.kind = internal ? 'transfer'
-    : isRefund && direction === 'credit' ? 'refund'
+  /*
+   * ORDER MATTERS. A refund is checked BEFORE the internal-transfer heuristic.
+   *
+   * INTERNAL_RE contains generic phrasing like "to your account", which
+   * appears in almost every credit — including "Refund Initiated: Rs.499 ...
+   * has been processed to your account". That booked real refunds as internal
+   * movement, so they neither offset the spending they reversed nor showed up
+   * anywhere the user could find them. Explicit refund wording is the far more
+   * specific signal and wins.
+   */
+  txn.kind = isRefund && direction === 'credit' ? 'refund'
+    : internal ? 'transfer'
     : direction === 'credit' ? 'income'
     : 'expense';
   if (txn.kind === 'transfer') { txn.category = 'transfer'; txn.categorySource = 'rule'; }
@@ -582,7 +645,10 @@ function parse(sms) {
   txn.ambiguousP2P = txn.merchantQuality === 'phone';
 
   txn.confidence = score(txn, explicitDate);
-  if (txn.merchantQuality && txn.merchantQuality !== 'named') txn.confidence -= 0.25;
+  // A sender-derived merchant is slightly weaker than one read from the body,
+  // but it is a real name — not the penalty an opaque handle deserves.
+  if (txn.merchantQuality === 'sender') txn.confidence -= 0.05;
+  else if (txn.merchantQuality && txn.merchantQuality !== 'named') txn.confidence -= 0.25;
   if (txn.currency !== 'INR') txn.confidence -= 0.3;
   txn.confidence = Math.max(0, Math.min(1, txn.confidence));
 
@@ -591,7 +657,9 @@ function parse(sms) {
   txn.needsReview = txn.confidence < REVIEW_THRESHOLD
     || txn.ambiguousP2P
     || txn.currency !== 'INR'
-    || (txn.merchantQuality != null && txn.merchantQuality !== 'named');
+    || (txn.merchantQuality != null
+        && txn.merchantQuality !== 'named'
+        && txn.merchantQuality !== 'sender');
 
   txn.fingerprint = fingerprint(txn);
   // Secondary key for cross-sender duplicates: one payment often produces a
@@ -696,7 +764,7 @@ function merchantKey(merchant) {
 
 export {
   parse, categorise, merchantKey, fingerprint,
-  normaliseSender, senderBank, isFinancialSender, vpaQuality, parseForeign, looksPersonal,
+  normaliseSender, senderBank, senderMerchant, isFinancialSender, vpaQuality, parseForeign, looksPersonal,
   REFUND_RE, INTERNAL_RE,
   parseAmount, parseDirection, parseMerchant, parseDate, parseRef,
   parseAccount, parseChannel, parseBalance,

@@ -3,9 +3,9 @@
  * coverage and the review queue.
  */
 
-import { inr, inrShort, inrExact, esc, fmtDate, plural, dayKey } from '../../core/format.js';
+import { inr, inrShort, inrExact, esc, plural, dayKey } from '../../core/format.js';
 import {
-  range, summarise, isPending, qualityBreakdown, reviewReason, PERIOD_LABEL,
+  range, summarise, isPending, qualityBreakdown, reviewGroups, PERIOD_LABEL,
 } from '../../core/analytics.js';
 import { setHtml, setText, setHidden, $ } from '../dom.js';
 import { catColor, NEUTRAL, GOOD, WARN, INFO } from '../theme.js';
@@ -121,6 +121,15 @@ function renderQuality(txns) {
     .join(''));
 }
 
+/**
+ * The review queue, grouped.
+ *
+ * A flat list of 1,165 rows is not a queue anyone clears, and until it is
+ * cleared those amounts are excluded from every total on the screen — so the
+ * app shows a number it knows to be incomplete. Grouped by merchant and
+ * reason, the same backlog becomes a few dozen decisions, each resolvable in
+ * one tap for the whole group.
+ */
 function renderReview(txns) {
   const pending = txns.filter(isPending);
   if (!pending.length) {
@@ -128,16 +137,31 @@ function renderReview(txns) {
     return;
   }
   setHidden('#reviewCard', false);
-  setHtml('#reviewList', pending.slice(0, 10).map((t) => `
-    <div class="review" data-fp="${esc(t.fingerprint)}">
+
+  const groups = reviewGroups(txns);
+  const excluded = pending.reduce((a, t) => a + t.amount, 0);
+
+  setText('#reviewSummary',
+    `${plural(pending.length, 'transaction')} worth ${inr(excluded)} are excluded from `
+    + `every total until confirmed — ${plural(groups.length, 'decision')} to clear them.`);
+
+  setHidden('#reviewBulk', false);
+  setHtml('#reviewList', groups.slice(0, 25).map((g) => `
+    <div class="review group" data-key="${esc(g.key)}">
+      <label class="review-pick">
+        <input type="checkbox" class="review-check" data-key="${esc(g.key)}" />
+      </label>
       <div class="row-main">
-        <strong>${inrExact(t.amount)} · ${esc(t.merchant || 'unknown')}</strong>
-        <span class="row-sub">${esc(fmtDate(t.date))} · ${esc(reviewReason(t))}</span>
-        <span class="raw">${esc(t.raw)}</span>
+        <strong>${esc(g.merchant)}
+          <span class="count-pill">${g.count}×</span></strong>
+        <span class="row-sub">${inrExact(g.total)} total · counted as ${esc(g.kind)} · ${esc(g.reason)}</span>
+        <span class="raw">${esc(g.sample.raw || '')}</span>
       </div>
       <div class="review-actions">
         <button class="mini ok" data-act="accept">Correct</button>
         <button class="mini no" data-act="reject">Not a transaction</button>
       </div>
-    </div>`).join(''));
+    </div>`).join('')
+    + (groups.length > 25
+      ? `<p class="hint tight">${groups.length - 25} more groups below the top 25.</p>` : ''));
 }

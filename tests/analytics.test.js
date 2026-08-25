@@ -11,7 +11,7 @@
 import {
   range, dailyRange, inRange, isSpend, isRefund, isIncome, counted, isPending,
   summarise, dailyBuckets, lastNDays, monthProjection, qualityBreakdown, reviewReason,
-  buildFacts,
+  reviewGroups, buildFacts,
 } from '../static/js/core/analytics.js';
 import { inr, inrShort, inrExact, dayKey, esc, csvCell, plural } from '../static/js/core/format.js';
 
@@ -290,6 +290,54 @@ const txn = (o = {}) => ({
 
   eq('plural singular', plural(1, 'transaction'), '1 transaction');
   eq('plural plural', plural(3, 'transaction'), '3 transactions');
+}
+
+// ===========================================================================
+// 9. Review grouping — the thing that makes a real backlog clearable
+// ===========================================================================
+{
+  const pend = (merchant, amount, kind = 'expense', conf = 0.4) =>
+    txn({ merchant, amount, kind, confidence: conf, needsReview: true, merchantQuality: 'sender' });
+
+  const many = [
+    ...Array.from({ length: 600 }, () => pend('epfo', 16672, 'transfer')),
+    ...Array.from({ length: 400 }, () => pend('tsspdcl', 1496)),
+    ...Array.from({ length: 165 }, () => pend(null, 499, 'refund')),
+    txn({ merchant: 'swiggy', amount: 450 }),      // already fine, not pending
+  ];
+
+  const groups = reviewGroups(many);
+  eq('1,165 pending rows collapse to three decisions', groups.length, 3);
+  eq('confirmed rows are not in the queue',
+    groups.reduce((a, g) => a + g.count, 0), 1165);
+
+  // Biggest money first: that is where a wrong bulk decision costs most.
+  eq('groups are ordered by amount at stake', groups[0].merchant, 'epfo');
+  eq('the largest group keeps its count', groups[0].count, 600);
+  eq('and its total', Math.round(groups[0].total), 600 * 16672);
+  eq('a group carries the kind its rows share', groups[0].kind, 'transfer');
+  ok('every group keeps its rows for the bulk write',
+    groups.every((g) => g.items.length === g.count));
+  ok('every group has a sample to show', groups.every((g) => Boolean(g.sample)));
+
+  // The percentage is stripped so 40% and 45% land in one group; otherwise the
+  // queue fragments into hundreds of near-identical decisions.
+  const mixedConf = [pend('acme', 100, 'expense', 0.4), pend('acme', 200, 'expense', 0.45)];
+  eq('rows differing only in confidence group together', reviewGroups(mixedConf).length, 1);
+
+  // A group whose rows disagree cannot be resolved with one kind.
+  const mixedKind = [pend('acme', 100, 'expense'), pend('acme', 200, 'income')];
+  eq('a group with disagreeing kinds is marked mixed', reviewGroups(mixedKind)[0].kind, 'mixed');
+
+  // Different reasons are different judgements even for one merchant.
+  const twoReasons = [
+    pend('acme', 100),
+    txn({ merchant: 'acme', amount: 200, needsReview: true, ambiguousP2P: true }),
+  ];
+  eq('one merchant flagged two ways is two decisions', reviewGroups(twoReasons).length, 2);
+
+  eq('an empty ledger has no groups', reviewGroups([]).length, 0);
+  eq('a clean ledger has no groups', reviewGroups([txn({})]).length, 0);
 }
 
 console.log('\n' + '-'.repeat(50));

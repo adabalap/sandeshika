@@ -15,8 +15,8 @@ plugins {
 // Kept in step with package.json, static/sw.js, static/js/main.js and app.py.
 // tests/shell.test.js fails when those disagree, and the app warns the user
 // about a stale cache when the page build differs from the server's.
-val appVersionName = "2.2.0"
-val appVersionCode = 20200
+val appVersionName = "2.3.0"
+val appVersionCode = 20300
 
 android {
     namespace = "com.adabala.sandeshika"

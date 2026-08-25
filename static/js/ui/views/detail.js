@@ -81,10 +81,17 @@ function renderProvenance(t) {
   const legend = used.map((f) =>
     `<span class="pv-key"><i class="pv-swatch pv-${f}"></i>${esc(FIELD_LABEL[f] || f)}</span>`).join('');
 
-  const verdict = c.missing.length
+  // A sender-derived merchant is explained rather than flagged: the name came
+  // from the DLT header, so its absence from the body is expected, not a fault.
+  const fromSender = t.merchantQuality === 'sender'
+    ? `<br><span class="row-sub">Merchant taken from the sender ID `
+      + `(${esc(t.senderId || t.sender || '')}), which is why it is not marked above.</span>`
+    : '';
+
+  const verdict = (c.missing.length
     ? `<span class="warn">${esc(c.missing.map((f) => FIELD_LABEL[f] || f).join(', '))} could not be `
       + 'located in the text — check this one.</span>'
-    : '<span class="ok">Every figure above was read from the highlighted text.</span>';
+    : '<span class="ok">Every figure above was read from the highlighted text.</span>') + fromSender;
 
   setHtml('#txnTrace', `<div class="pv-legend">${legend}</div><p class="pv-verdict">${verdict}</p>`);
 }

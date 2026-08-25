@@ -1,4 +1,4 @@
-# Sandeshika 2.2.0 — every file in this release.
+# Sandeshika 2.3.0 — every file in this release.
 #
 # A release archive cannot express a deletion: extracting over a working
 # tree adds and overwrites but never removes. This is how the upgrade

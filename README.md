@@ -179,7 +179,7 @@ suite that reports red for a correct codebase is a suite people stop believing.
 
 ```bash
 npm run check                 # lint + typecheck + all JS suites (what CI runs)
-npm test                      # 915 assertions across 14 suites
+npm test                      # 938 assertions across 14 suites
 python3 tests/server_test.py  # 34 assertions — proxy, limiter, headers
 python3 tools/redact.py --selftest
 ```
@@ -188,7 +188,7 @@ python3 tools/redact.py --selftest
 ✓ analytics · parser · organizer · model · transport · learning
 ✓ pipeline · realcorpus · shell · native-bridge · boot · e2e
 ✓ provenance · redact
-14 suites · 915 passed · 0 failed        (+ 41 Python)
+14 suites · 938 passed · 0 failed        (+ 41 Python)
 ```
 
 Each suite is a plain script that counts assertions and exits non-zero, so any
@@ -345,6 +345,28 @@ Each produces a confident, plausible, wrong number — invisible in a demo.
 - **An undefined soft key could enter the dedup set**, after which every
   keyless transaction matched the first one as a duplicate.
 
+### Found in screenshots from a running install (2.3)
+
+- **1,165 transactions sat in the review queue**, and every rupee of them was
+  excluded from every total on screen. The cause was one thing: the message body
+  named no merchant, so confidence fell to 0.4 and the row was held back — even
+  though the DLT sender header (`AD-EPFOHO`, `VM-MYNTRA`, `VM-TSSPDC`) names the
+  merchant perfectly well. Bank senders are deliberately excluded: money leaving
+  an HDFC account is not a payment to HDFC.
+- **The queue is now grouped and resolvable in bulk.** 1,165 rows collapse to a
+  few dozen decisions, ordered by money at stake, each clearable in one tap —
+  optionally re-classifying the whole group as spending, income, refund or
+  transfer as it is confirmed. A flat list of a thousand rows is not a queue
+  anyone finishes, and an unfinished queue means the app knowingly shows an
+  incomplete total.
+- **Refunds were being booked as internal transfers.** `INTERNAL_RE` contains
+  generic phrasing like "to your account", which appears in "Refund Initiated:
+  Rs.499 … processed to your account". Explicit refund wording now outranks the
+  internal heuristic.
+- **EPF contributions counted as income**, overstating earnings every month one
+  landed. They are the user's own money moving into their own pocket — the same
+  argument that already excluded FASTag reloads.
+
 ### Found in a real 5,000-message inbox (2.2)
 
 A drift report from an actual phone surfaced four things no synthetic corpus had:
@@ -476,7 +498,7 @@ static/js/ui/
   views/                      overview, dashboard, daily, detail, transactions,
                               bills, inbox, ask, setup
 
-tests/                      14 JS suites (915) + server_test.py (41)
+tests/                      14 JS suites (938) + server_test.py (41)
 tools/redact.py             the same redaction, offline, for bulk corpus files
 tools/bump_version.py       moves all five version constants together
 tools/prune_stale.py        removes files an upgrade could not delete

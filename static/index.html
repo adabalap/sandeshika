@@ -143,7 +143,31 @@
 
     <div class="card" id="reviewCard" hidden>
       <h2>Needs your review</h2>
-      <p class="hint">Low-confidence parses are excluded from totals until you confirm them.</p>
+      <p class="hint" id="reviewSummary"></p>
+
+      <!--
+        Grouped, and resolvable in bulk. A flat list of a thousand rows is not a
+        queue anyone finishes, and until it is finished those amounts are
+        excluded from every total on the screen.
+      -->
+      <div class="bulk-bar" id="reviewBulk" hidden>
+        <label class="review-pick">
+          <input type="checkbox" id="reviewAll" />
+          <span id="reviewSelected">0 selected</span>
+        </label>
+        <div class="bulk-actions">
+          <select id="reviewKind" aria-label="Count the selected groups as">
+            <option value="">Keep current kind</option>
+            <option value="expense">Count as spending</option>
+            <option value="income">Count as income</option>
+            <option value="refund">Count as refund</option>
+            <option value="transfer">Count as transfer</option>
+          </select>
+          <button class="mini ok" id="reviewAccept">Confirm selected</button>
+          <button class="mini no" id="reviewReject">Not transactions</button>
+        </div>
+      </div>
+
       <div id="reviewList"></div>
     </div>
 

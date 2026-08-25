@@ -183,8 +183,17 @@ export function segments(txn, raw) {
 export function coverage(txn) {
   /** @type {Array<Span['field']>} */
   const candidates = ['amount', 'date', 'account', 'merchant', 'ref'];
-  const expected = candidates
-    .filter((f) => (f === 'amount' ? typeof txn.amount === 'number' : Boolean(txn[f])));
+  const expected = candidates.filter((f) => {
+    if (f === 'amount') return typeof txn.amount === 'number';
+    /*
+     * A merchant taken from the DLT sender header is not IN the body, so it can
+     * never be highlighted there. Counting it as untraceable would tell the
+     * user their transaction looks suspect when nothing is wrong with it — the
+     * name simply came from the envelope rather than the letter.
+     */
+    if (f === 'merchant' && txn.merchantQuality === 'sender') return false;
+    return Boolean(txn[f]);
+  });
   const found = new Set(locate(txn).map((s) => s.field));
   return {
     expected: expected.length,

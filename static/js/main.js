@@ -31,7 +31,7 @@ import { renderCustomCats, renderImportHint, renderDriftList } from './ui/views/
 import { ask } from './ui/views/ask.js';
 
 /** Bumped with every release; compared against the server to spot a stale cache. */
-const BUILD = '2.2.0';
+const BUILD = '2.3.0';
 
 // ---------------------------------------------------------------------------
 // Rendering
@@ -142,11 +142,62 @@ function wireTransactions() {
   delegate('#catChips', 'button[data-cat]', 'click',
     (el) => actions.setCategory(el.dataset.cat || ''));
 
+  // A row action resolves that whole group; the bulk bar resolves every
+  // selected group. Both go through the same code path.
   delegate('#reviewList', 'button[data-act]', 'click', (el) => {
     const wrap = el.closest('.review');
     if (!wrap) return;
-    actions.resolveReview(/** @type {HTMLElement} */ (wrap).dataset.fp || '',
-      el.dataset.act === 'accept');
+    const key = /** @type {HTMLElement} */ (wrap).dataset.key || '';
+    const accept = el.dataset.act === 'accept';
+    actions.resolveGroup(key, accept ? 'accept' : 'reject', accept ? kindChoice() : {});
+  });
+
+  const selectedKeys = () => $$('#reviewList .review-check')
+    .filter((c) => /** @type {HTMLInputElement} */ (c).checked)
+    .map((c) => c.dataset.key || '');
+
+  const syncSelection = () => {
+    const n = selectedKeys().length;
+    setText('#reviewSelected', n ? `${n} selected` : 'Select groups');
+  };
+
+  const kindChoice = () => {
+    const k = val('#reviewKind');
+    return k ? { kind: /** @type {any} */ (k) } : {};
+  };
+
+  delegate('#reviewList', '.review-check', 'change', syncSelection);
+
+  on('#reviewAll', 'change', (e) => {
+    const on_ = /** @type {HTMLInputElement} */ (e.target).checked;
+    $$('#reviewList .review-check').forEach((c) => {
+      /** @type {HTMLInputElement} */ (c).checked = on_;
+    });
+    syncSelection();
+  });
+
+  on('#reviewAccept', 'click', () => {
+    const keys = selectedKeys();
+    if (!keys.length) {
+      banner('Select at least one group first', 'error');
+      return;
+    }
+    // Naming the count makes an accidental sweep of forty groups recoverable
+    // knowledge rather than a surprise.
+    if (confirm(`Confirm ${keys.length} group(s)? They will start counting towards your totals.`)) {
+      actions.resolveGroupsWith(keys, 'accept', kindChoice());
+    }
+  });
+
+  on('#reviewReject', 'click', () => {
+    const keys = selectedKeys();
+    if (!keys.length) {
+      banner('Select at least one group first', 'error');
+      return;
+    }
+    if (confirm(`Delete every transaction in ${keys.length} group(s)? This cannot be undone.`)) {
+      actions.resolveGroupsWith(keys, 'reject', {});
+    }
   });
 
   delegate('#attentionList', 'button', 'click', (el) => {

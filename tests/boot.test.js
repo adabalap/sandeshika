@@ -317,10 +317,94 @@ ok('the coverage panel is populated',
 }
 
 // ---------------------------------------------------------------------------
+// Batch review: one tap clears a whole group
+//
+// On a real inbox this queue held 1,165 rows. Reviewing them one at a time is
+// not a workflow anybody completes, and until it is completed every total on
+// screen is knowingly incomplete.
+// ---------------------------------------------------------------------------
+{
+  const { reviewGroups } = await import('../static/js/core/analytics.js');
+  const actions = await import('../static/js/ui/actions.js');
+  const stateMod = await import('../static/js/ui/state.js');
+
+  // Seed a backlog of the shape the screenshots showed: same merchant, same
+  // reason, dozens of rows.
+  const seeded = [];
+  for (let i = 0; i < 40; i++) {
+    const t = {
+      smsId: 90000 + i,
+      fingerprint: 'pending' + i,
+      direction: 'debit',
+      kind: 'expense',
+      amount: 1496,
+      currency: 'INR',
+      foreignAmount: null,
+      foreignCurrency: null,
+      account: '1234',
+      merchant: 'tsspdcl',
+      merchantQuality: 'sender',
+      ref: null,
+      channel: 'other',
+      date: NOW,
+      balance: null,
+      sender: 'VM-TSSPDC',
+      senderId: 'TSSPDC',
+      bank: null,
+      category: 'bills',
+      categorySource: 'sender',
+      confidence: 0.4,
+      needsReview: true,
+      raw: 'Dear Consumer, Your Payment of Rs. 1496 Vide receipt no. 1234567',
+    };
+    seeded.push(t);
+    store.set('txn/' + t.fingerprint, JSON.stringify(t));
+  }
+  await actions.reload();
+  await new Promise((r) => setTimeout(r, 120));
+
+  const groups = reviewGroups(stateMod.get().txns);
+  const target = groups.find((g) => g.merchant === 'tsspdcl');
+  ok('the backlog is grouped rather than listed flat', Boolean(target),
+    JSON.stringify(groups.map((g) => g.merchant)));
+  if (target) eq('all forty rows are one decision', target.count, 40);
+
+  const card = $('#reviewCard');
+  ok('the review card is shown', card && !card.hidden);
+  ok('the bulk bar is available', $('#reviewBulk') && !$('#reviewBulk').hidden);
+  ok('a group row renders with its count',
+    ($('#reviewList') || {}).innerHTML.includes('40'),
+    ($('#reviewList') || {}).innerHTML.slice(0, 200));
+
+  // Confirm the whole group as a transfer in one action.
+  await actions.resolveGroup(target.key, 'accept', { kind: 'transfer' });
+  await new Promise((r) => setTimeout(r, 120));
+
+  const after = stateMod.get().txns.filter((t) => t.merchant === 'tsspdcl');
+  eq('every row in the group was written', after.length, 40);
+  ok('none are still pending', after.every((t) => t.reviewed === true && !t.needsReview),
+    JSON.stringify(after.slice(0, 1)));
+  ok('the batch kind was applied to all of them',
+    after.every((t) => t.kind === 'transfer'), JSON.stringify(after[0]));
+  // A batch decision is a user decision and must survive the next re-import.
+  ok('the decision is marked as the user\'s',
+    after.every((t) => t.kindSource === 'user'));
+
+  eq('the queue is empty afterwards',
+    reviewGroups(stateMod.get().txns).filter((g) => g.merchant === 'tsspdcl').length, 0);
+}
+
+// ---------------------------------------------------------------------------
 // Provenance: the figures are traceable to the message
 // ---------------------------------------------------------------------------
 {
-  const row = window.document.querySelector('#txnList .txn-row');
+  // Pick a row whose merchant was read from the BODY. A sender-derived
+  // merchant is legitimately absent from the text and cannot be highlighted.
+  const row = [...window.document.querySelectorAll('#txnList .txn-row')]
+    .find((el) => {
+      const t = JSON.parse(store.get('txn/' + el.dataset.fp) || '{}');
+      return t.merchantQuality === 'named';
+    }) || window.document.querySelector('#txnList .txn-row');
   ok('the transaction list has rows', Boolean(row));
   if (row) {
     row.dispatchEvent(new window.Event('click', { bubbles: true }));

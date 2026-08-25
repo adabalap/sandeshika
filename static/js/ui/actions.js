@@ -14,6 +14,7 @@ import * as P from '../core/parser.js';
 import { buildDriftReport } from '../core/redact.js';
 import * as O from '../core/organizer.js';
 import { inrExact, esc, csvCell } from '../core/format.js';
+import { reviewGroups } from '../core/analytics.js';
 import {
   api, ApiError, Store, Keys, listPrefix, putMany, loadTransactions, putTxn, deleteTxn,
 } from '../data/client.js';
@@ -265,6 +266,75 @@ export async function resolveReview(fp, accept) {
   } catch (e) {
     banner(friendly(e), 'error');
   }
+}
+
+/**
+ * Resolves an entire review group in one write.
+ *
+ * The single most important action in the app for anyone with a real inbox:
+ * 1,165 pending rows are not reviewed one at a time, and while they sit there
+ * every total on screen is knowingly incomplete.
+ *
+ * @param {string} key         group key from reviewGroups()
+ * @param {'accept'|'reject'} action
+ * @param {{kind?: import('../core/types.js').Kind, category?: string}} [apply]
+ *   Optional corrections applied to the whole group as it is confirmed.
+ */
+export async function resolveGroup(key, action, apply = {}, opts = {}) {
+  const groups = reviewGroups(state.get().txns);
+  const g = groups.find((x) => x.key === key);
+  if (!g) return;
+
+  const label = `${g.count} × ${g.merchant}`;
+  try {
+    if (action === 'reject') {
+      // Sequential: a few hundred parallel deletes is exactly the burst that
+      // makes Medha's queue reject the rest of them.
+      for (const t of g.items) await deleteTxn(t.fingerprint);
+      state.set({ txns: state.get().txns.filter((t) => !g.items.includes(t)) });
+      if (!opts.quiet) toast(`${label} removed — not transactions`, 'success');
+    } else {
+      await putMany(g.items.map((t) => {
+        const kind = apply.kind || t.kind;
+        const category = apply.category || t.category;
+        return {
+          key: Keys.txn(t.fingerprint),
+          value: JSON.stringify({
+            ...t,
+            kind,
+            category,
+            // A batch decision is a user decision, and must not be undone by
+            // the next re-import.
+            kindSource: apply.kind ? 'user' : t.kindSource,
+            categorySource: apply.category ? 'user' : t.categorySource,
+            needsReview: false,
+            reviewed: true,
+          }),
+        };
+      }));
+      const extra = apply.kind ? ` as ${apply.kind}` : '';
+      if (!opts.quiet) toast(`${label} confirmed${extra} — now counted`, 'success');
+    }
+    if (!opts.quiet) await reload();
+  } catch (e) {
+    banner(friendly(e), 'error');
+  }
+}
+
+/**
+ * Resolves several groups at once, for the select-and-sweep case.
+ * @param {string[]} keys
+ * @param {'accept'|'reject'} action
+ * @param {{kind?: import('../core/types.js').Kind, category?: string}} [apply]
+ */
+export async function resolveGroupsWith(keys, action, apply = {}) {
+  let done = 0;
+  for (const k of keys) {
+    await resolveGroup(k, action, apply, { quiet: true });
+    done++;
+  }
+  toast(`${done} group(s) ${action === 'accept' ? 'confirmed' : 'removed'}`, 'success');
+  await reload();
 }
 
 /** Marks both halves of a suggested pair as an internal transfer, in one write. */

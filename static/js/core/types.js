@@ -40,7 +40,14 @@
  * @typedef {'user'|'rule'|'sender'|'model'|'llm'|'guess'|'fallback'|'unresolved'} CategorySource
  */
 
-/** @typedef {'named'|'phone'|'opaque'} MerchantQuality */
+/**
+ * How the merchant name was obtained.
+ * - `named`  read from the message body
+ * - `sender` taken from the DLT sender header, when the body named nobody
+ * - `phone`  paid to a phone number: person or shop is genuinely unknown
+ * - `opaque` an unreadable UPI handle
+ * @typedef {'named'|'sender'|'phone'|'opaque'} MerchantQuality
+ */
 
 /**
  * A parsed transaction. Written to Medha's store keyed by `fingerprint`.

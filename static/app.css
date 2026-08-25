@@ -766,3 +766,58 @@ code { background: var(--card-2); padding: 1px 5px; border-radius: 4px; font-siz
   .app-bar, .tabs, .toasts, .drawer, .sheet, button { display: none !important; }
   .card { break-inside: avoid; box-shadow: none; }
 }
+
+/* ==========================================================================
+   Review queue — grouped and batch-resolvable
+   ==========================================================================
+   A flat list of a thousand rows is not a queue anyone finishes, and until it
+   is finished those amounts are excluded from every total on screen. Grouping
+   turns the backlog into a few dozen decisions; the bulk bar turns those into
+   one sweep.
+   ========================================================================== */
+.bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  margin-bottom: var(--sp-2);
+  background: var(--card-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  position: sticky;
+  top: 52px;                 /* clears the sticky tab bar */
+  z-index: 5;
+}
+.bulk-actions { display: flex; gap: var(--sp-2); align-items: center; margin-left: auto; flex-wrap: wrap; }
+.bulk-actions select {
+  width: auto; min-width: 150px;
+  padding: 7px 10px; font-size: 12.5px;
+}
+.bulk-actions .mini { margin-top: 0; }
+
+.review-pick { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); }
+.review-pick input {
+  width: 20px; height: 20px;   /* a tap target, not a pinhead */
+  margin: 0; flex: 0 0 auto; accent-color: var(--brand);
+}
+
+.review.group { align-items: flex-start; gap: 10px; }
+.review.group .row-main strong { white-space: normal; }
+
+/* How many rows one decision clears — the number that makes the queue feel
+   finite rather than endless. */
+.count-pill {
+  display: inline-block;
+  background: var(--brand-100);
+  color: var(--brand-600);
+  border-radius: var(--pill);
+  padding: 1px 8px;
+  margin-left: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+@media (prefers-color-scheme: dark) {
+  .count-pill { color: var(--brand-400); }
+}

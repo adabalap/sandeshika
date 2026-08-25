@@ -297,6 +297,56 @@ export function qualityBreakdown(txns) {
 }
 
 /**
+ * Groups the review queue so it can be cleared in batches instead of one row
+ * at a time.
+ *
+ * On a real inbox this queue held 1,165 items. Reviewing them individually is
+ * not a workflow anybody completes, so the totals stay permanently incomplete
+ * and the app's central promise — that the number is trustworthy — quietly
+ * fails. Grouped by merchant and reason, those same 1,165 rows collapse into a
+ * few dozen decisions, and each one is a judgement the user can actually make:
+ * "yes, everything from EPFO is a transfer".
+ *
+ * @param {Txn[]} txns
+ * @returns {Array<{key: string, merchant: string, reason: string, count: number,
+ *   total: number, kind: string, items: Txn[], sample: Txn}>}
+ */
+export function reviewGroups(txns) {
+  /** @type {Map<string, any>} */
+  const groups = new Map();
+  for (const t of txns) {
+    if (!isPending(t)) continue;
+    // Merchant plus reason: the same merchant flagged for two different
+    // reasons is two different decisions.
+    const merchant = (t.merchant || 'unknown').toLowerCase();
+    // The percentage is stripped so rows at 40% and 45% group together; the
+    // phrase already says "low confidence", hence no replacement text.
+    const reason = reviewReason(t).replace(/\s*\d+%/, '');
+    const key = `${merchant}|${reason}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        merchant: t.merchant || 'Unknown',
+        reason,
+        count: 0,
+        total: 0,
+        kind: t.kind,
+        items: [],
+        sample: t,
+      });
+    }
+    const g = groups.get(key);
+    g.count++;
+    g.total += t.amount;
+    g.items.push(t);
+    // A group whose rows disagree about kind cannot be resolved in one action.
+    if (g.kind !== t.kind) g.kind = 'mixed';
+  }
+  // Biggest money first: that is where a wrong decision costs the most.
+  return [...groups.values()].sort((a, b) => b.total - a.total);
+}
+
+/**
  * Plain-language reason a transaction is in the review queue.
  * @param {Txn} t
  */
