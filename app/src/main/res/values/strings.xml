@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Sandeshika</string>
+    <string name="perm_title">Sandeshika needs to read your messages</string>
+    <string name="perm_body">Everything happens on this phone. Messages are read, sorted and shown here — none of them are uploaded, and nothing is sent anywhere.</string>
+    <string name="perm_grant">Allow</string>
+    <string name="perm_denied">Without message access there is nothing to organise. You can grant it in Settings → Apps → Sandeshika → Permissions.</string>
+    <string name="empty_tab">Nothing here yet.</string>
+    <string name="loading">Reading your inbox…</string>
+    <string name="rescan">Rescan</string>
+    <string name="scanned">%1$d messages · %2$d uncategorised</string>
+</resources>
