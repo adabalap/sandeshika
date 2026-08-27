@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <!-- Matches the bg token in the stylesheet's dark theme, so the window
-         behind the WebView never flashes light while the page loads. -->
-    <color name="window_bg">#0D0F1A</color>
-</resources>

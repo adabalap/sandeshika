@@ -1,31 +1,18 @@
-/*
- * Sandeshika — Android wrapper.
- *
- * This project exists for one reason: to host the PWA in a WebView and give it
- * a direct, in-process route to Medha, so the app works on the phone with no
- * laptop and no Flask server running anywhere.
- *
- * In the browser, static/js/data/transport.js reaches Medha through the Flask
- * reverse proxy. Inside this APK there is no Flask server at all, so the same
- * module detects `window.AndroidMedha` and calls the bridge in MedhaBridge.kt
- * instead. The two paths are interchangeable by design and both are covered by
- * tests/transport.test.js.
- */
 pluginManagement {
-    repositories {
-        google()
-        mavenCentral()
-        gradlePluginPortal()
-    }
+    repositories { google(); mavenCentral(); gradlePluginPortal() }
 }
-
 dependencyResolutionManagement {
-    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
-    repositories {
-        google()
-        mavenCentral()
-    }
+    repositories { google(); mavenCentral() }
 }
+rootProject.name = "sandeshika"
 
-rootProject.name = "Sandeshika"
-include(":app")
+// :app is deliberately absent until it has a build file. Gradle configures
+// every included module before running any task, so an included-but-empty
+// module fails the whole build -- including the core tests, which have
+// nothing to do with it. It gets added in the same commit that gives it a
+// build.gradle.kts.
+// Pure-Kotlin, zero-Android module. Split out so the parsing and
+// classification logic -- the part where correctness actually matters and
+// where bugs are silent -- can be compiled and unit-tested on a plain JVM,
+// with no emulator and no Android SDK in the loop.
+include(":core:classify")

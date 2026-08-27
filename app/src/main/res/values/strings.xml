@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <!-- app_name is supplied per flavour in build.gradle.kts (resValue), so the
-         core and full builds are distinguishable in the launcher. -->
-</resources>
