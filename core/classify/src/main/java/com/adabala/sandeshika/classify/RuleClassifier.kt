@@ -52,6 +52,8 @@ object RuleClassifier {
         matchBill(lower)?.let { return it }
         matchTravel(lower, body)?.let { return it }
         matchDelivery(lower)?.let { return it }
+        matchService(lower)?.let { return it }
+        matchInstitution(lower)?.let { return it }
         matchSpam(lower)?.let { return it }
         matchPromotion(lower)?.let { return it }
 
@@ -141,11 +143,11 @@ object RuleClassifier {
      * "debited" twice over.
      */
     private val DEBIT_RE = Regex(
-        """\b(debited|debit|spent|withdrawn|withdrawal|paid|payment of|purchase|deducted|sent|transferred|transfer of)\b""",
+        """\b(debited|debit|spent|withdrawn|withdrawal|paid|payment of|purchase|deducted|sent|transferred|transfer|trxn|txn|swiped|using)\b""",
         RegexOption.IGNORE_CASE
     )
     private val CREDIT_RE = Regex(
-        """\b(credited|credit|received|deposited|refund(?:ed)?|cashback|added to)\b""",
+        """\b(credited|credit|received|deposited|refund(?:ed)?|cashback|added to|receipt of)\b""",
         RegexOption.IGNORE_CASE
     )
 
@@ -186,7 +188,12 @@ object RuleClassifier {
     private val BALANCE_WORDS = listOf(
         "available balance", "avl bal", "avbl bal", "a/c balance", "account balance",
         "bal in", "closing balance", "minimum limit", "minimum balance", "min bal",
-        "statement is ready", "statement for", "e-statement"
+        "statement is ready", "statement for", "e-statement",
+        // Daily broker reports, the largest balance-shaped block in the real
+        // corpus. They quote a rupee figure and no movement, so without this
+        // they land in the uncategorised pile.
+        "fund bal", "fund balance", "securities bal", "securities balance",
+        "your balance is", "client funds"
     )
 
     /**
@@ -202,6 +209,7 @@ object RuleClassifier {
     private val BILL_WORDS = listOf(
         "bill", "due date", "is due", "payment due", "outstanding",
         "minimum amount due", "total amount due", "last date", "overdue",
+        "unpaid", "dues", "remain unpaid", "suspended as dues",
         "recharge", "validity expires", "expires on", "renew", "premium due", "emi"
     )
 
@@ -222,7 +230,8 @@ object RuleClassifier {
 
     private val DELIVERY_WORDS = listOf(
         "out for delivery", "delivered", "shipped", "dispatched", "your order",
-        "order id", "tracking", "courier", "arriving", "package"
+        "order id", "tracking", "courier", "arriving", "package", "awb", "consignment",
+        "shipment", "clearance delay", "out for", "delivery attempt"
     )
 
     private fun matchDelivery(lower: String): Classification? {
@@ -297,6 +306,31 @@ object RuleClassifier {
             return Classification(Category.SPAM, true, "$weak scam markers together")
         }
         return null
+    }
+
+    private val SERVICE_WORDS = listOf(
+        "missed call", "was unreachable", "not reachable", "high speed limit",
+        "data limit", "data balance", "sign-in attempt", "sign-in from",
+        "login attempt", "wi-fi calling", "network coverage", "sim card",
+        "plan benefits", "roaming", "voicemail", "service request", "complaint no",
+        "ticket no", "request has been registered", "installation", "technician"
+    )
+
+    private fun matchService(lower: String): Classification? {
+        val hit = SERVICE_WORDS.firstOrNull { lower.contains(it) } ?: return null
+        return Classification(Category.SERVICE, true, "service notice: \"$hit\"")
+    }
+
+    private val INSTITUTION_WORDS = listOf(
+        "your ward", "dear parent", "attendance", "was absent", "classe(s)",
+        "semester", "exam", "hall ticket", "admission", "fee payment",
+        "appointment", "consultation", "test result", "report is ready",
+        "prescription", "vaccination"
+    )
+
+    private fun matchInstitution(lower: String): Classification? {
+        val hit = INSTITUTION_WORDS.firstOrNull { lower.contains(it) } ?: return null
+        return Classification(Category.INSTITUTION, true, "institutional notice: \"$hit\"")
     }
 
     private val PROMO_WORDS = listOf(

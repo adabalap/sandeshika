@@ -54,6 +54,28 @@ enum class Category {
     /** PNR, flight, train, bus, cab. */
     TRAVEL,
 
+    /**
+     * Operator and service notices with nothing to pay and no money moved:
+     * missed-call alerts, data-limit warnings, coverage announcements,
+     * sign-in notifications.
+     *
+     * These made up the single largest block of uncategorised messages on a
+     * real 20,261-message inbox. They are not bills, not transactions and not
+     * marketing, and forcing them into any of those would corrupt a tab
+     * people rely on.
+     */
+    SERVICE,
+
+    /**
+     * Institutional messages addressed to you as a parent, patient or
+     * student: attendance, appointments, results.
+     *
+     * Kept out of PERSONAL because they come from an organisation rather than
+     * a person, and out of SERVICE because they are about someone in your
+     * life rather than about an account.
+     */
+    INSTITUTION,
+
     /** From a human, not a business. */
     PERSONAL,
 
