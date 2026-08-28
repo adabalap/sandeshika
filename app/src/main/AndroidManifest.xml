@@ -38,5 +38,23 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+          Sharing the tuning export as a file rather than an Intent extra.
+          EXTRA_TEXT goes through a Binder transaction capped near 1 MB, and a
+          real inbox produced 2,988 shapes, comfortably past it, which
+          crashed the app with TransactionTooLargeException the moment Share
+          was tapped. A content:// URI has no such limit, and it is also what
+          lets the file open in a spreadsheet.
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.exports"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 </manifest>

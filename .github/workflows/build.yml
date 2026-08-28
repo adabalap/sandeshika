@@ -19,6 +19,9 @@ jobs:
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v4
       - run: chmod +x gradlew
+      - name: Check XML well-formedness
+        run: python3 tools/check_xml.py
+
       - name: Test core logic
         run: ./gradlew :core:classify:test --no-daemon
       - name: Upload test report

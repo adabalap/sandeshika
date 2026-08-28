@@ -26,6 +26,29 @@ package com.adabala.sandeshika.classify
  */
 object MessageRedactor {
 
+    /**
+     * Extra redaction inputs that only exist on a real device.
+     *
+     * [contactNames] comes from the address book and is by far the most
+     * reliable signal available: it is the actual list of people this person
+     * knows, so no pattern-matching heuristic is needed to recognise them.
+     *
+     * [customTerms] is whatever the user adds after reading a preview and
+     * spotting something the rules missed. That feedback loop matters more
+     * than any single pattern, because the one thing guaranteed about
+     * redaction rules is that some inbox will contain a shape nobody
+     * anticipated.
+     */
+    data class RedactionContext(
+        val contactNames: Set<String> = emptySet(),
+        val customTerms: Set<String> = emptySet()
+    )
+
+    private val GENERIC_SALUTATIONS = setOf(
+        "customer", "parent", "user", "member", "sir", "madam", "client",
+        "subscriber", "guest", "friend", "team", "all", "valued"
+    )
+
     /** A distinct message shape and how many messages collapsed into it. */
     data class Template(
         val sender: String,
@@ -42,8 +65,33 @@ object MessageRedactor {
      * patterns need in order to recognise themselves — an account number
      * would become `<N4>` before the account rule ever saw it.
      */
-    fun redactBody(body: String): String {
+    fun redactBody(body: String, extra: RedactionContext = RedactionContext()): String {
         var s = body
+
+        // Known contact names first, and they are the strongest tool here.
+        //
+        // Pattern-based name detection is guesswork -- it cannot tell
+        // "Dear Ramesh" from "Dear Customer". The address book is ground
+        // truth for the names that actually matter to this person, so any of
+        // them appearing anywhere in any message is removed outright,
+        // whatever the surrounding grammar. Longest first, so "Ramesh Kumar"
+        // is replaced whole rather than leaving a stray "Kumar".
+        for (name in extra.contactNames.sortedByDescending { it.length }) {
+            if (name.length < 3) continue
+            s = s.replace(Regex("""\b${Regex.escape(name)}\b""", RegexOption.IGNORE_CASE), "<NAME>")
+        }
+        // Anything the user added by hand after reading a preview.
+        for (term in extra.customTerms.sortedByDescending { it.length }) {
+            if (term.length < 3) continue
+            s = s.replace(Regex("""\b${Regex.escape(term)}\b""", RegexOption.IGNORE_CASE), "<REDACTED>")
+        }
+
+        // Structured identifiers, before anything generic can fragment them.
+        s = s.replace(Regex("""\b[\w.+-]+@[\w-]+\.[\w.]{2,}\b"""), "<EMAIL>")
+        s = s.replace(Regex("""\b[A-Z]{5}\d{4}[A-Z]\b"""), "<PAN>")
+        s = s.replace(Regex("""\b\d{4}[\s-]\d{4}[\s-]\d{4}[\s-]\d{4}\b"""), "<CARD>")
+        s = s.replace(Regex("""\b\d{4}\s\d{4}\s\d{4}\b"""), "<AADHAAR>")
+        s = s.replace(Regex("""\b[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{3,4}\b"""), "<VEHICLE>")
 
         // URLs first: they contain digits, dots and slashes that every later
         // rule would otherwise carve up into meaningless fragments.
@@ -94,6 +142,17 @@ object MessageRedactor {
         // UPI virtual payment addresses are identifiers too: name@okhdfcbank.
         s = s.replace(Regex("""\b[\w.\-]{2,}@[a-z]{2,}\b""", RegexOption.IGNORE_CASE), "<VPA>")
 
+        // Salutations. "Dear Ramesh" is a name even though a single
+        // title-case word after a preposition is not enough to conclude that
+        // anywhere else. Common non-names are excluded so "Dear Customer"
+        // and "Dear Parent" survive -- those carry template shape and no PII.
+        s = Regex("""\b(?i:dear|hi|hello|mr|mrs|ms|shri|smt)\.?\s+([A-Z][a-z]{2,})""")
+            .replace(s) { m ->
+                val word = m.groupValues[1]
+                if (word.lowercase() in GENERIC_SALUTATIONS) m.value
+                else m.value.replace(word, "<NAME>")
+            }
+
         // Phone numbers before bare digit runs, or the digit rule swallows them.
         s = s.replace(Regex("""\+?91[\s-]?\d{10}\b"""), "<PHONE>")
         s = s.replace(Regex("""\b\d{10}\b"""), "<PHONE>")
@@ -137,7 +196,8 @@ object MessageRedactor {
      */
     fun templates(
         messages: List<Pair<String, Sms>>,
-        onlyUncategorised: Boolean = true
+        onlyUncategorised: Boolean = true,
+        context: RedactionContext = RedactionContext()
     ): List<Template> {
         val excluded = setOf(Category.PERSONAL, Category.OTP)
         val grouped = mutableMapOf<Pair<String, String>, MutableList<Category>>()
@@ -146,7 +206,7 @@ object MessageRedactor {
             val category = RuleClassifier.classify(sms).category
             if (category in excluded) continue
             if (onlyUncategorised && category != Category.OTHER) continue
-            val key = redactSender(sms.sender) to redactBody(sms.body)
+            val key = redactSender(sms.sender) to redactBody(sms.body, context)
             grouped.getOrPut(key) { mutableListOf() }.add(category)
         }
 
@@ -154,6 +214,27 @@ object MessageRedactor {
             Template(key.first, key.second, cats.size, cats.first())
         }.sortedByDescending { it.count }
     }
+
+    /**
+     * CSV, for opening in a spreadsheet and reviewing before sharing.
+     *
+     * Quoting is not optional here: message shapes routinely contain commas,
+     * quotes and newlines, and an unquoted export would silently shear rows
+     * apart in Excel -- producing a file that looks fine until someone acts
+     * on a mangled row.
+     */
+    fun renderCsv(templates: List<Template>): String = buildString {
+        append("count,sender,category,shape\n")
+        templates.forEach { t ->
+            append(t.count).append(',')
+            append(csv(t.sender)).append(',')
+            append(t.category).append(',')
+            append(csv(t.shape)).append('\n')
+        }
+    }
+
+    private fun csv(v: String): String =
+        "\"" + v.replace("\"", "\"\"").replace("\n", " ") + "\""
 
     /** Renders templates as the plain text that actually gets shared. */
     fun render(templates: List<Template>, totalScanned: Int): String = buildString {

@@ -48,6 +48,18 @@ object SmsReader {
      */
     private val contacts = mutableMapOf<String, String?>()
 
+    /**
+     * Every name resolved from the address book during the last scan.
+     *
+     * Handed to the redactor so those names can be stripped from *every*
+     * message body, not just the ones they sent. A bank message naming a
+     * payee, a delivery SMS naming a recipient -- pattern matching cannot
+     * reliably spot those, but an exact list of the people this person knows
+     * can.
+     */
+    val knownContactNames: Set<String>
+        get() = contacts.values.filterNotNull().toSet()
+
     fun read(
         context: Context,
         limit: Int = NO_LIMIT,

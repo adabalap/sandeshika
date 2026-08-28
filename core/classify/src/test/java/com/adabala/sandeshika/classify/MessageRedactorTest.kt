@@ -79,4 +79,52 @@ class MessageRedactorTest {
     assertTrue("otp body excluded", tpl.none { it.shape.contains("OTP") })
     assertTrue("uncategorised included", tpl.any { it.shape.contains("unrecognised") })
     }
+
+    /**
+     * The device-only inputs: address-book names and user-supplied terms.
+     *
+     * Contact names are the strongest redaction signal available and the
+     * reason this is not purely pattern-based. No regex can tell "Dear
+     * Ramesh" from "Dear Customer", but an exact list of the people someone
+     * knows can -- so both cases are pinned here, along with the structured
+     * identifiers (PAN, Aadhaar, card, vehicle) that are unambiguous enough
+     * to match on shape alone.
+     */
+    @Test
+    fun `uses contacts and custom terms, and escapes CSV correctly`() {
+        val ctx = MessageRedactor.RedactionContext(
+            contactNames = setOf("Ramesh Kumar", "Priya", "Dhande Parvati"),
+            customTerms = setOf("ACME Corp")
+        )
+        fun r(s: String) = MessageRedactor.redactBody(s, ctx)
+        fun rp(s: String) = MessageRedactor.redactBody(s)
+
+    // contact-book names, the strongest signal
+    assertTrue("full contact name removed", !r("Sent Rs.60 to Ramesh Kumar").contains("Ramesh"))
+    assertTrue("partial contact name removed", !r("Call Priya about it").contains("Priya"))
+    assertTrue("case-insensitive contact match", !r("sent to RAMESH KUMAR").contains("RAMESH"))
+    assertTrue("longest-first avoids stray remnant", !r("To Ramesh Kumar now").contains("Kumar"))
+    // user-added terms
+    assertTrue("custom term removed", !r("Invoice from ACME Corp").contains("ACME"))
+    // structured PII
+    assertTrue("email", rp("mail me at foo.bar@gmail.com ok").contains("<EMAIL>"))
+    assertTrue("PAN", rp("PAN ABCDE1234F linked").contains("<PAN>"))
+    assertTrue("card", rp("card 4111 1111 1111 1111 used").contains("<CARD>"))
+    assertTrue("aadhaar", rp("Aadhaar 1234 5678 9012 verified").contains("<AADHAAR>"))
+    assertTrue("vehicle", rp("Vehicle MH12AB1234 challan").contains("<VEHICLE>"))
+    // salutation names vs generic salutations
+    assertTrue("Dear Ramesh redacted", rp("Dear Ramesh, your bill is ready").contains("<NAME>"))
+    assertTrue("Dear Customer kept", rp("Dear Customer, your bill is ready").contains("Customer"))
+    assertTrue("Dear Parent kept", rp("Dear Parent, your ward attended").contains("Parent"))
+    // no regressions on shape
+    assertTrue("amount shape kept", rp("Rs.5000 debited")=="Rs.<N4> debited")
+    assertTrue("marketing copy kept", rp("Thank you for Shopping with us!").contains("Shopping with us"))
+    assertTrue("bank name kept", rp("From HDFC Bank A/C *5261").contains("HDFC Bank"))
+    // CSV correctness: shapes contain commas and quotes
+    val tpls = listOf(MessageRedactor.Template("AD-X", "a,b \"q\" c", 3, Category.OTHER))
+    val csv = MessageRedactor.renderCsv(tpls)
+    assertTrue("csv header", csv.startsWith("count,sender,category,shape"))
+    assertTrue("csv quotes escaped", csv.contains("\"a,b \"\"q\"\" c\""))
+    assertTrue("csv has no raw newline in field", csv.trim().split("\n").size==2)
+    }
 }

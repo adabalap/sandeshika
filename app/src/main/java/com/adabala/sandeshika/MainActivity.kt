@@ -173,7 +173,11 @@ private fun InboxScreen() {
     var showExport by remember { mutableStateOf(false) }
 
     if (showExport && all != null) {
-        ExportDialog(messages = all, onDismiss = { showExport = false })
+        ExportDialog(
+            messages = all,
+            contactNames = SmsReader.knownContactNames,
+            onDismiss = { showExport = false }
+        )
     }
 
     // Grouped by sender, most-recent group first.
@@ -307,62 +311,123 @@ private fun TabRowScrollable(
 }
 
 /**
- * Builds and shares the redacted tuning summary.
+ * Builds, previews and shares the redacted tuning export.
  *
- * The preview is not a courtesy, it is the point. Asking someone to share
- * anything derived from their SMS inbox is only reasonable if they can read
- * the exact text first -- so the summary is built, shown in full, and only
- * then is a share button offered.
+ * Three deliberate properties, each answering a way this could go wrong:
+ *
+ *  - **Written to a file, not an Intent extra.** A real inbox produced 2,988
+ *    shapes; putting that in EXTRA_TEXT exceeded Android's Binder limit and
+ *    crashed the app on Share. A file also happens to be what you want for
+ *    opening in a spreadsheet.
+ *  - **Preview before share, always.** Anything derived from an SMS inbox is
+ *    only reasonable to share if the person can read it first.
+ *  - **A place to add missed terms.** No redaction ruleset survives contact
+ *    with every inbox. Rather than pretending otherwise, the preview is
+ *    followed by a field for anything the rules missed, and rebuilding
+ *    applies it.
  */
 @Composable
-private fun ExportDialog(messages: List<ClassifiedSms>, onDismiss: () -> Unit) {
+private fun ExportDialog(
+    messages: List<ClassifiedSms>,
+    contactNames: Set<String>,
+    onDismiss: () -> Unit
+) {
     val context = LocalContext.current
-    var built by remember { mutableStateOf<String?>(null) }
-    var shapeCount by remember { mutableStateOf(0) }
-    var msgCount by remember { mutableStateOf(0) }
+    var built by remember { mutableStateOf<List<MessageRedactor.Template>?>(null) }
+    var custom by remember { mutableStateOf("") }
+    var allCategories by remember { mutableStateOf(false) }
+
+    fun build() {
+        val ctx = MessageRedactor.RedactionContext(
+            contactNames = contactNames,
+            customTerms = custom.split(",").map { it.trim() }.filter { it.length >= 3 }.toSet()
+        )
+        built = MessageRedactor.templates(
+            messages.map { "" to it.sms },
+            onlyUncategorised = !allCategories,
+            context = ctx
+        )
+    }
+
+    fun share(asCsv: Boolean) {
+        val templates = built ?: return
+        runCatching {
+            val dir = java.io.File(context.filesDir, "exports").apply { mkdirs() }
+            dir.listFiles()?.forEach { it.delete() }
+            val name = if (asCsv) "sandeshika-shapes.csv" else "sandeshika-shapes.txt"
+            val file = java.io.File(dir, name)
+            file.writeText(
+                if (asCsv) MessageRedactor.renderCsv(templates)
+                else MessageRedactor.render(templates, messages.size)
+            )
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                context, context.packageName + ".exports", file
+            )
+            context.startActivity(
+                Intent.createChooser(
+                    Intent(Intent.ACTION_SEND).apply {
+                        type = if (asCsv) "text/csv" else "text/plain"
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    },
+                    null
+                )
+            )
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.export_title)) },
         text = {
-            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+            Column(Modifier.heightIn(max = 430.dp).verticalScroll(rememberScrollState())) {
                 if (built == null) {
                     Text(stringResource(R.string.export_body), fontSize = 13.sp)
+                    Spacer(Modifier.height(12.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = allCategories, onCheckedChange = { allCategories = it })
+                        Text(stringResource(R.string.export_all_scope), fontSize = 12.5.sp)
+                    }
                 } else {
+                    val t = built!!
                     Text(
-                        stringResource(R.string.export_summary, shapeCount, msgCount),
+                        stringResource(R.string.export_summary, t.size, t.sumOf { it.count }),
                         fontSize = 12.sp, fontWeight = FontWeight.Bold
                     )
                     Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = custom,
+                        onValueChange = { custom = it },
+                        label = { Text(stringResource(R.string.export_custom), fontSize = 11.sp) },
+                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    TextButton(onClick = { build() }) {
+                        Text(stringResource(R.string.export_rebuild), fontSize = 12.sp)
+                    }
+                    Spacer(Modifier.height(4.dp))
                     Text(
-                        built!!,
-                        fontSize = 10.5.sp,
+                        MessageRedactor.render(t.take(40), messages.size),
+                        fontSize = 10.sp,
                         fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
                     )
+                    if (t.size > 40) {
+                        Text(
+                            stringResource(R.string.export_truncated, t.size - 40),
+                            fontSize = 11.sp, fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
         },
         confirmButton = {
             if (built == null) {
-                TextButton(onClick = {
-                    val pairs = messages.map { "" to it.sms }
-                    val templates = MessageRedactor.templates(pairs, onlyUncategorised = true)
-                    shapeCount = templates.size
-                    msgCount = templates.sumOf { it.count }
-                    built = MessageRedactor.render(templates, messages.size)
-                }) { Text(stringResource(R.string.export_build)) }
+                TextButton(onClick = { build() }) { Text(stringResource(R.string.export_build)) }
             } else {
-                TextButton(onClick = {
-                    context.startActivity(
-                        Intent.createChooser(
-                            Intent(Intent.ACTION_SEND).apply {
-                                type = "text/plain"
-                                putExtra(Intent.EXTRA_TEXT, built)
-                            },
-                            null
-                        )
-                    )
-                }) { Text(stringResource(R.string.export_share)) }
+                Row {
+                    TextButton(onClick = { share(true) }) { Text(stringResource(R.string.export_csv)) }
+                    TextButton(onClick = { share(false) }) { Text(stringResource(R.string.export_txt)) }
+                }
             }
         },
         dismissButton = {
