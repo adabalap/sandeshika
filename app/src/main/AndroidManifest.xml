@@ -13,6 +13,14 @@
     -->
     <uses-permission android:name="android.permission.READ_SMS" />
 
+    <!--
+      Optional. Used only to show an address-book name instead of a bare
+      number on messages from people. SmsReader returns null rather than
+      throwing when this is not granted, so declining it costs you names and
+      nothing else.
+    -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"

@@ -8,6 +8,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -16,6 +17,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,23 +43,45 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private val Saffron = Color(0xFFE07B27)
-private val SaffronDark = Color(0xFF8C3F0B)
-private val Ink = Color(0xFF1C1410)
+// A restrained accent rather than a brand slab. The first cut painted the
+// whole header saffron, which read as loud and dated -- current Material
+// practice is tonal surfaces carrying the layout and colour reserved for
+// things that mean something, which here is the category chips.
+private val Accent = Color(0xFFB4531A)
+private val AccentDark = Color(0xFFFFB77C)
+
+private val LightScheme = lightColorScheme(
+    primary = Accent,
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFFFFDBC7),
+    onPrimaryContainer = Color(0xFF3A1600),
+    surface = Color(0xFFFFF8F5),
+    onSurface = Color(0xFF201A17),
+    surfaceVariant = Color(0xFFF4DED4),
+    onSurfaceVariant = Color(0xFF52443D),
+    outlineVariant = Color(0xFFD7C2B8),
+)
+
+private val DarkScheme = darkColorScheme(
+    primary = AccentDark,
+    onPrimary = Color(0xFF5A2600),
+    primaryContainer = Color(0xFF7F3A05),
+    onPrimaryContainer = Color(0xFFFFDBC7),
+    surface = Color(0xFF1A120E),
+    onSurface = Color(0xFFEDE0DA),
+    surfaceVariant = Color(0xFF52443D),
+    onSurfaceVariant = Color(0xFFD7C2B8),
+    outlineVariant = Color(0xFF52443D),
+)
 
 @Composable
 private fun SandeshikaTheme(content: @Composable () -> Unit) {
-    // A single explicit scheme rather than dynamic colour: category colours
-    // below carry meaning, and a wallpaper-derived palette could quietly make
-    // two of them look alike.
+    // Explicit schemes rather than dynamic colour. The category chips encode
+    // meaning through colour, and a wallpaper-derived palette could quietly
+    // collapse two of them into near-identical shades -- which would break
+    // the one visual affordance the list depends on.
     MaterialTheme(
-        colorScheme = lightColorScheme(
-            primary = Saffron,
-            onPrimary = Color.White,
-            surface = Color(0xFFFFFBF7),
-            onSurface = Ink,
-            surfaceVariant = Color(0xFFF6EDE5),
-        ),
+        colorScheme = if (isSystemInDarkTheme()) DarkScheme else LightScheme,
         content = content
     )
 }
@@ -72,11 +96,25 @@ private fun App() {
         )
     }
     var asked by remember { mutableStateOf(false) }
+    // Both requested together, but only READ_SMS gates the app. Contacts is
+    // asked for in the same breath because a second prompt later, out of
+    // context, is the kind of thing people reflexively deny.
     val launcher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { ok -> granted = ok; asked = true }
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
+        granted = result[Manifest.permission.READ_SMS] == true
+        asked = true
+    }
 
-    if (granted) InboxScreen() else PermissionGate(asked) { launcher.launch(Manifest.permission.READ_SMS) }
+    if (granted) {
+        InboxScreen()
+    } else {
+        PermissionGate(asked) {
+            launcher.launch(
+                arrayOf(Manifest.permission.READ_SMS, Manifest.permission.READ_CONTACTS)
+            )
+        }
+    }
 }
 
 @Composable
@@ -89,7 +127,7 @@ private fun PermissionGate(alreadyAsked: Boolean, onGrant: () -> Unit) {
         Text(
             stringResource(R.string.perm_title),
             fontSize = 20.sp, fontWeight = FontWeight.Bold,
-            color = Ink
+            color = MaterialTheme.colorScheme.onSurface
         )
         Spacer(Modifier.height(12.dp))
         // Says plainly that nothing leaves the device. That is the whole
@@ -97,7 +135,7 @@ private fun PermissionGate(alreadyAsked: Boolean, onGrant: () -> Unit) {
         // an SMS permission prompt is actually asking.
         Text(
             stringResource(R.string.perm_body),
-            fontSize = 14.sp, color = Ink.copy(alpha = 0.7f)
+            fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Spacer(Modifier.height(24.dp))
         Button(onClick = onGrant) { Text(stringResource(R.string.perm_grant)) }
@@ -105,7 +143,7 @@ private fun PermissionGate(alreadyAsked: Boolean, onGrant: () -> Unit) {
             Spacer(Modifier.height(16.dp))
             Text(
                 stringResource(R.string.perm_denied),
-                fontSize = 12.5.sp, color = Ink.copy(alpha = 0.6f)
+                fontSize = 12.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
@@ -134,7 +172,7 @@ private fun InboxScreen() {
 
     Scaffold(
         topBar = {
-            Column(Modifier.background(Saffron)) {
+            Column(Modifier.background(MaterialTheme.colorScheme.surface)) {
                 TopAppBar(
                     title = {
                         Column {
@@ -147,19 +185,19 @@ private fun InboxScreen() {
                                         all.count { it.classification.category == Category.OTHER }
                                     ),
                                     fontSize = 11.5.sp,
-                                    color = Color.White.copy(alpha = 0.85f)
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
                     },
                     actions = {
                         TextButton(onClick = { reloadKey++ }) {
-                            Text(stringResource(R.string.rescan), color = Color.White)
+                            Text(stringResource(R.string.rescan))
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = Saffron,
-                        titleContentColor = Color.White
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        titleContentColor = MaterialTheme.colorScheme.onSurface
                     )
                 )
                 TabRowScrollable(selectedTab, all) { selectedTab = it }
@@ -170,7 +208,7 @@ private fun InboxScreen() {
             when {
                 all == null -> Box(Modifier.fillMaxSize(), Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator(color = Saffron)
+                        CircularProgressIndicator()
                         Spacer(Modifier.height(12.dp))
                         Text(stringResource(R.string.loading), fontSize = 13.sp)
                     }
@@ -178,7 +216,7 @@ private fun InboxScreen() {
                 shown.isEmpty() -> Box(Modifier.fillMaxSize(), Alignment.Center) {
                     Text(
                         stringResource(R.string.empty_tab),
-                        color = Ink.copy(alpha = 0.5f), fontSize = 14.sp
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp
                     )
                 }
                 else -> LazyColumn(
@@ -217,12 +255,14 @@ private fun TabRowScrollable(
             val active = tab == selected
             Surface(
                 shape = RoundedCornerShape(20.dp),
-                color = if (active) Color.White else Color.White.copy(alpha = 0.22f),
+                color = if (active) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.surfaceVariant,
                 modifier = Modifier.clickable { onSelect(tab) }
             ) {
                 Text(
                     text = if (count != null) "${tab.label} $count" else tab.label,
-                    color = if (active) SaffronDark else Color.White,
+                    color = if (active) MaterialTheme.colorScheme.onPrimary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 12.5.sp,
                     fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp)
@@ -237,8 +277,8 @@ private fun MessageCard(item: ClassifiedSms) {
     val cat = item.classification.category
     Surface(
         shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 1.dp,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        tonalElevation = 0.dp,
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(Modifier.padding(14.dp)) {
@@ -246,20 +286,20 @@ private fun MessageCard(item: ClassifiedSms) {
                 CategoryChip(cat)
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    item.sms.sender,
+                    item.displaySender,
                     fontSize = 12.5.sp, fontWeight = FontWeight.Bold,
-                    color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
                 Text(
                     formatWhen(item.sms.receivedAt),
-                    fontSize = 11.sp, color = Ink.copy(alpha = 0.45f)
+                    fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             Spacer(Modifier.height(6.dp))
             Text(
                 item.sms.body,
-                fontSize = 14.sp, color = Ink.copy(alpha = 0.85f),
+                fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 4, overflow = TextOverflow.Ellipsis
             )
             // The reasoning is shown, not hidden behind a long-press. A
@@ -270,7 +310,7 @@ private fun MessageCard(item: ClassifiedSms) {
             Text(
                 item.classification.why +
                     if (!item.classification.confident) " · low confidence" else "",
-                fontSize = 10.5.sp, color = Ink.copy(alpha = 0.4f)
+                fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
@@ -285,7 +325,9 @@ private fun CategoryChip(cat: Category) {
         Category.PROMOTION -> "Ad" to Color(0xFF9E9E9E)
         Category.DELIVERY -> "Box" to Color(0xFF2E86C1)
         Category.TRAVEL -> "Trip" to Color(0xFF117A8B)
-        Category.PERSONAL -> "You" to Color(0xFFE07B27)
+        Category.BALANCE -> "Bal" to Color(0xFF7B5E00)
+        Category.SPAM -> "Spam" to Color(0xFFB3261E)
+        Category.PERSONAL -> "You" to Color(0xFFB4531A)
         Category.OTHER -> "?" to Color(0xFFB0A99F)
     }
     Surface(shape = RoundedCornerShape(6.dp), color = color.copy(alpha = 0.14f)) {

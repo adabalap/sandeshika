@@ -107,4 +107,46 @@ class RuleClassifierTest {
     val amb = RuleClassifier.classify(Sms("VM-X","Rs 100 debited and Rs 50 credited"))
     assertTrue("both directions flags low confidence", !amb.confident)
     }
+
+    /**
+     * Verbatim messages from a real 500-message Indian inbox, all three of
+     * which the first version of this classifier filed as "uncategorised".
+     *
+     * They are kept exactly as received, newlines and all. Paraphrasing them
+     * would lose the specific shape that caused the miss -- the HDFC UPI
+     * message fails only because "Sent" and "To" are separated, which a
+     * tidied-up version of the same message would not reproduce.
+     */
+    @Test
+    fun `handles the message shapes a real inbox actually contained`() {
+        assertTrue(
+            "HDFC UPI debit is a transaction, not uncategorised",
+            cat("JD-HDFCBK-S", "Sent Rs.60.00\nFrom HDFC Bank A/C *5261\nTo DHANDE PARVATI\nOn 26/08/26")
+                == Category.TRANSACTION
+        )
+        assertTrue(
+            "minimum-balance alert is BALANCE, not a transaction",
+            cat("JM-HDFCBK-S", "UPDATE:Bal in HDFC Bank A/c XX5261 has gone below minimum limit of INR 5,000.00.Yesterday's bal:INR 1,258.27")
+                == Category.BALANCE
+        )
+        assertTrue(
+            "fake-salary work-from-home message is SPAM",
+            cat("AD-BIZAFA-S", "Dear Sir/Mam Your Salary was passed, Work at home with Rs39800 has been rescheduled to you")
+                == Category.SPAM
+        )
+        // A debit that also reports the resulting balance must stay a
+        // transaction: demoting it to BALANCE would quietly empty the
+        // spending view.
+        assertTrue(
+            "debit reporting a balance stays a transaction",
+            cat("VM-HDFCBK", "Rs 500.00 debited from A/c XX1234. Avl bal: Rs 2,000.00")
+                == Category.TRANSACTION
+        )
+        // One spam marker is not enough: a real payroll message mentions
+        // salary too.
+        assertTrue(
+            "a single spam-ish word does not make a message spam",
+            cat("VM-PAYROL", "Your salary for August has been processed.") != Category.SPAM
+        )
+    }
 }

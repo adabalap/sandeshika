@@ -28,6 +28,17 @@ enum class Category {
     /** Money moved. Debit, credit, UPI, card, ATM. */
     TRANSACTION,
 
+    /**
+     * Bank telling you where you stand, without money having moved: balance
+     * alerts, minimum-balance warnings, statement-ready notices.
+     *
+     * Separate from TRANSACTION because folding them together corrupts any
+     * spending total -- a "your balance is Rs 1,258" message contains a rupee
+     * figure that is emphatically not a spend. Separate from BILL because
+     * there is nothing to pay.
+     */
+    BALANCE,
+
     /** An obligation with a date: bill due, recharge expiring, EMI upcoming. */
     BILL,
 
@@ -45,6 +56,17 @@ enum class Category {
 
     /** From a human, not a business. */
     PERSONAL,
+
+    /**
+     * Fraud and junk masquerading as something legitimate: work-from-home
+     * "salary" messages, lottery wins, loan-approval bait.
+     *
+     * Deliberately not folded into PROMOTION. A real offer from a shop you
+     * use and a scam impersonating your employer deserve different treatment,
+     * and burying the second in a tab people ignore by design is exactly how
+     * someone gets caught by it.
+     */
+    SPAM,
 
     /** Genuinely unclassifiable, or the classifier abstained. */
     OTHER

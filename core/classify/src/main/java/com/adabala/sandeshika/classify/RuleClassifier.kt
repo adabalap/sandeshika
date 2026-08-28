@@ -48,9 +48,11 @@ object RuleClassifier {
 
         matchOtp(lower, body)?.let { return it }
         matchTransaction(lower, body)?.let { return it }
+        matchBalance(lower)?.let { return it }
         matchBill(lower)?.let { return it }
         matchTravel(lower, body)?.let { return it }
         matchDelivery(lower)?.let { return it }
+        matchSpam(lower)?.let { return it }
         matchPromotion(lower)?.let { return it }
 
         // Abstain rather than guess. OTHER is a real answer here: it means
@@ -125,18 +127,32 @@ object RuleClassifier {
      */
     private val CODE_RE = Regex("""(?<!\d)(?<!\d\.)\d{4,8}(?!\d)(?!\.\d)""")
 
-    private val DEBIT_WORDS = listOf(
-        "debited", "debit", "spent", "withdrawn", "paid", "purchase",
-        "deducted", "sent to", "transferred to"
+    /**
+     * Movement verbs, matched on word boundaries rather than as substrings.
+     *
+     * Substring matching is what let a plain UPI debit fall through to
+     * "uncategorised" on a real inbox: the list held the phrase "sent to",
+     * but HDFC writes "Sent Rs.60.00 From A/C *5261 To DHANDE PARVATI" --
+     * the two words are separated by the whole rest of the message. A single
+     * brittle phrase like that silently costs a whole message shape, and
+     * there is no error anywhere to notice.
+     *
+     * Boundaries also stop "credit" matching "creditor" and "debit" matching
+     * "debited" twice over.
+     */
+    private val DEBIT_RE = Regex(
+        """\b(debited|debit|spent|withdrawn|withdrawal|paid|payment of|purchase|deducted|sent|transferred|transfer of)\b""",
+        RegexOption.IGNORE_CASE
     )
-    private val CREDIT_WORDS = listOf(
-        "credited", "credit", "received", "deposited", "refund", "cashback"
+    private val CREDIT_RE = Regex(
+        """\b(credited|credit|received|deposited|refund(?:ed)?|cashback|added to)\b""",
+        RegexOption.IGNORE_CASE
     )
 
     private fun matchTransaction(lower: String, body: String): Classification? {
         if (!AMOUNT_RE.containsMatchIn(body)) return null
-        val debit = DEBIT_WORDS.any { lower.contains(it) }
-        val credit = CREDIT_WORDS.any { lower.contains(it) }
+        val debit = DEBIT_RE.containsMatchIn(lower)
+        val credit = CREDIT_RE.containsMatchIn(lower)
         if (!debit && !credit) return null
         // "will be debited" / "due to be debited" is a future obligation, not
         // a completed movement -- that is a bill, and matchBill will take it.
@@ -166,6 +182,22 @@ object RuleClassifier {
     private val FUTURE_RE = Regex(
         """\b(will be|shall be|is due to be|due to be|scheduled to be)\s+(debited|deducted|charged)"""
     )
+
+    private val BALANCE_WORDS = listOf(
+        "available balance", "avl bal", "avbl bal", "a/c balance", "account balance",
+        "bal in", "closing balance", "minimum limit", "minimum balance", "min bal",
+        "statement is ready", "statement for", "e-statement"
+    )
+
+    /**
+     * Runs after [matchTransaction] on purpose. Many genuine debit messages
+     * end with "Avl bal: Rs 2,000", and a balance rule placed first would
+     * swallow every one of them, quietly emptying the spending view.
+     */
+    private fun matchBalance(lower: String): Classification? {
+        val hit = BALANCE_WORDS.firstOrNull { lower.contains(it) } ?: return null
+        return Classification(Category.BALANCE, true, "balance wording: \"$hit\"")
+    }
 
     private val BILL_WORDS = listOf(
         "bill", "due date", "is due", "payment due", "outstanding",
@@ -198,10 +230,44 @@ object RuleClassifier {
         return Classification(Category.DELIVERY, true, "delivery wording: \"$hit\"")
     }
 
+    /**
+     * Scam markers, checked before promotion.
+     *
+     * These are the shapes that actually circulate on Indian numbers: fake
+     * salary and work-from-home bait, lottery wins, pre-approved loans from
+     * senders you have no relationship with. Two signals are required rather
+     * than one, because any single term here also appears in legitimate
+     * messages -- a real employer does mention salary. Requiring a pair keeps
+     * a genuine payroll SMS out of the spam pile.
+     */
+    private val SPAM_WORDS = listOf(
+        "work at home", "work from home", "part time job", "part-time job",
+        "earn daily", "earn upto", "earn up to", "no investment", "daily income",
+        "lottery", "you have won", "claim your prize", "lucky winner",
+        "pre-approved loan", "preapproved loan", "instant loan", "loan approved",
+        "salary was passed", "job offer", "hiring now", "whatsapp.com/send"
+    )
+
+    private fun matchSpam(lower: String): Classification? {
+        val hits = SPAM_WORDS.filter { lower.contains(it) }
+        if (hits.size < 2) return null
+        return Classification(Category.SPAM, true, "scam markers: ${hits.take(2).joinToString(", ")}")
+    }
+
     private val PROMO_WORDS = listOf(
         "offer", "sale", "discount", "% off", "flat ", "coupon", "deal",
         "t&c apply", "tnc apply", "click here", "shop now", "buy now",
-        "limited time", "hurry", "exclusive", "unsubscribe", "lowest price"
+        "limited time", "hurry", "exclusive", "unsubscribe", "lowest price",
+        // Added after a real 500-message inbox produced zero promotions,
+        // which is not a believable number for an Indian phone. The originals
+        // were written from imagination; these are the phrasings that
+        // actually turn up.
+        "cashback upto", "save upto", "save up to", "free delivery", "use code",
+        "apply now", "download the app", "install now", "get flat", "starting at",
+        "book now", "last chance", "ends today", "new arrivals", "upgrade now",
+        "recharge now", "refer and earn", "win ", "assured", "bonanza",
+        "off on", "special price", "megasale", "biggest sale", "click:", "bit.ly",
+        "tinyurl", "know more", "explore now", "grab "
     )
 
     private fun matchPromotion(lower: String): Classification? {
