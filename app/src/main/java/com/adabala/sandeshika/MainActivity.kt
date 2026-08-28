@@ -2,6 +2,7 @@ package com.adabala.sandeshika
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -30,6 +32,7 @@ import androidx.core.content.ContextCompat
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import com.adabala.sandeshika.classify.Category
+import com.adabala.sandeshika.classify.MessageRedactor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -166,8 +169,28 @@ private fun InboxScreen() {
     }
 
     val all = messages
-    val shown = remember(all, selectedTab) {
-        all?.filter { it.classification.category in selectedTab.categories }.orEmpty()
+    var expanded by remember { mutableStateOf<String?>(null) }
+    var showExport by remember { mutableStateOf(false) }
+
+    if (showExport && all != null) {
+        ExportDialog(messages = all, onDismiss = { showExport = false })
+    }
+
+    // Grouped by sender, most-recent group first.
+    //
+    // A flat list does not survive real volume: 2,308 offers on a real inbox
+    // came from a few dozen senders repeating near-identical text, so
+    // scrolling it meant reading the same Bata message twenty times. Grouping
+    // turns that into a few dozen rows you can actually scan, and makes
+    // "mute this sender" an obvious next step rather than a per-message
+    // chore.
+    val groups = remember(all, selectedTab) {
+        all?.asSequence()
+            ?.filter { it.classification.category in selectedTab.categories }
+            ?.groupBy { it.displaySender }
+            ?.map { (sender, msgs) -> SenderGroup(sender, msgs.sortedByDescending { m -> m.sms.receivedAt }) }
+            ?.sortedByDescending { it.messages.first().sms.receivedAt }
+            .orEmpty()
     }
 
     Scaffold(
@@ -191,6 +214,9 @@ private fun InboxScreen() {
                         }
                     },
                     actions = {
+                        TextButton(onClick = { showExport = true }) {
+                            Text(stringResource(R.string.export))
+                        }
                         TextButton(onClick = { reloadKey++ }) {
                             Text(stringResource(R.string.rescan))
                         }
@@ -213,7 +239,7 @@ private fun InboxScreen() {
                         Text(stringResource(R.string.loading), fontSize = 13.sp)
                     }
                 }
-                shown.isEmpty() -> Box(Modifier.fillMaxSize(), Alignment.Center) {
+                groups.isEmpty() -> Box(Modifier.fillMaxSize(), Alignment.Center) {
                     Text(
                         stringResource(R.string.empty_tab),
                         color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp
@@ -223,7 +249,15 @@ private fun InboxScreen() {
                     contentPadding = PaddingValues(12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(shown) { MessageCard(it) }
+                    items(groups, key = { it.sender }) { group ->
+                        SenderGroupCard(
+                            group = group,
+                            isExpanded = expanded == group.sender,
+                            onToggle = {
+                                expanded = if (expanded == group.sender) null else group.sender
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -272,46 +306,153 @@ private fun TabRowScrollable(
     }
 }
 
+/**
+ * Builds and shares the redacted tuning summary.
+ *
+ * The preview is not a courtesy, it is the point. Asking someone to share
+ * anything derived from their SMS inbox is only reasonable if they can read
+ * the exact text first -- so the summary is built, shown in full, and only
+ * then is a share button offered.
+ */
 @Composable
-private fun MessageCard(item: ClassifiedSms) {
-    val cat = item.classification.category
+private fun ExportDialog(messages: List<ClassifiedSms>, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    var built by remember { mutableStateOf<String?>(null) }
+    var shapeCount by remember { mutableStateOf(0) }
+    var msgCount by remember { mutableStateOf(0) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.export_title)) },
+        text = {
+            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                if (built == null) {
+                    Text(stringResource(R.string.export_body), fontSize = 13.sp)
+                } else {
+                    Text(
+                        stringResource(R.string.export_summary, shapeCount, msgCount),
+                        fontSize = 12.sp, fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        built!!,
+                        fontSize = 10.5.sp,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            if (built == null) {
+                TextButton(onClick = {
+                    val pairs = messages.map { "" to it.sms }
+                    val templates = MessageRedactor.templates(pairs, onlyUncategorised = true)
+                    shapeCount = templates.size
+                    msgCount = templates.sumOf { it.count }
+                    built = MessageRedactor.render(templates, messages.size)
+                }) { Text(stringResource(R.string.export_build)) }
+            } else {
+                TextButton(onClick = {
+                    context.startActivity(
+                        Intent.createChooser(
+                            Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(Intent.EXTRA_TEXT, built)
+                            },
+                            null
+                        )
+                    )
+                }) { Text(stringResource(R.string.export_share)) }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.export_cancel)) }
+        }
+    )
+}
+
+private data class SenderGroup(val sender: String, val messages: List<ClassifiedSms>)
+
+/**
+ * One sender, collapsed to a single row until tapped.
+ *
+ * Collapsed shows the newest message and how many others there are, which is
+ * what someone scanning a tab actually needs. Expanding is opt-in because at
+ * 24,000 messages the default has to be "show me less".
+ */
+@Composable
+private fun SenderGroupCard(group: SenderGroup, isExpanded: Boolean, onToggle: () -> Unit) {
+    val newest = group.messages.first()
     Surface(
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-        tonalElevation = 0.dp,
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier.fillMaxWidth().clickable { onToggle() }
     ) {
         Column(Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                CategoryChip(cat)
+                CategoryChip(newest.classification.category)
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    item.displaySender,
+                    group.sender,
                     fontSize = 12.5.sp, fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
+                if (group.messages.size > 1) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                    ) {
+                        Text(
+                            "${group.messages.size}",
+                            fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                }
                 Text(
-                    formatWhen(item.sms.receivedAt),
+                    formatWhen(newest.sms.receivedAt),
                     fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             Spacer(Modifier.height(6.dp))
-            Text(
-                item.sms.body,
-                fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 4, overflow = TextOverflow.Ellipsis
-            )
-            // The reasoning is shown, not hidden behind a long-press. A
-            // category you disagree with is worth little if you cannot see
-            // what produced it, and this is what makes a correction
-            // meaningful later rather than just a patch.
-            Spacer(Modifier.height(6.dp))
-            Text(
-                item.classification.why +
-                    if (!item.classification.confident) " · low confidence" else "",
-                fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            if (isExpanded) {
+                group.messages.forEach { m ->
+                    Column(Modifier.padding(top = 8.dp)) {
+                        Text(
+                            formatWhen(m.sms.receivedAt),
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            m.sms.body,
+                            fontSize = 13.5.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            m.classification.why +
+                                if (!m.classification.confident) " · low confidence" else "",
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            } else {
+                Text(
+                    newest.sms.body,
+                    fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 3, overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    newest.classification.why +
+                        if (!newest.classification.confident) " · low confidence" else "",
+                    fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }

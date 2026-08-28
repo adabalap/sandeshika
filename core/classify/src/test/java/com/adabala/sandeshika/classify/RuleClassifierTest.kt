@@ -149,4 +149,30 @@ class RuleClassifierTest {
             cat("VM-PAYROL", "Your salary for August has been processed.") != Category.SPAM
         )
     }
+
+    /**
+     * Scam shapes that circulate on Indian numbers.
+     *
+     * Added after a real 24,040-message inbox produced exactly one spam
+     * classification. The first four failed on word order -- the rules held
+     * contiguous phrases like "pre-approved loan" which never match "loan of
+     * Rs 5,00,000 is pre-approved" -- and KYC phishing, probably the single
+     * most common shape of all, was not covered at any threshold.
+     */
+    @Test
+    fun `catches the scam shapes that actually circulate`() {
+        assertTrue("lottery win", cat("AD-X", "Congratulations! You have won Rs 25,00,000 in KBC lottery.") == Category.SPAM)
+        assertTrue("work from home", cat("AD-X", "Earn daily 2000-5000 from home. No investment. WhatsApp 9876543210") == Category.SPAM)
+        assertTrue("pre-approved loan, reversed word order",
+            cat("AD-X", "Your loan of Rs 5,00,000 is pre-approved. Click bit.ly/abc to claim.") == Category.SPAM)
+        assertTrue("part time job", cat("AD-X", "Part time job available, earn upto 35000 per month.") == Category.SPAM)
+        assertTrue("KYC phishing",
+            cat("AD-X", "Dear customer your KYC is expired, account will be blocked. Click here to update.") == Category.SPAM)
+
+        // Must not swallow legitimate bank messages that mention the same nouns.
+        assertTrue("real KYC completion notice is not spam",
+            cat("VM-HDFCBK", "Your KYC has been successfully updated. Thank you.") != Category.SPAM)
+        assertTrue("real loan EMI notice is not spam",
+            cat("VM-HDFCBK", "Your home loan EMI of Rs 24,500 is due on 05-Sep") != Category.SPAM)
+    }
 }

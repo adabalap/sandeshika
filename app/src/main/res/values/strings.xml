@@ -8,5 +8,12 @@
     <string name="empty_tab">Nothing here yet.</string>
     <string name="loading">Reading your inbox…</string>
     <string name="rescan">Rescan</string>
+    <string name="export">Export shapes</string>
+    <string name="export_title">Export for tuning</string>
+    <string name="export_body">Builds a redacted summary of the messages that could not be categorised, so the rules can be improved.\n\nAmounts, account numbers, names, phone numbers, dates and links are replaced with placeholders. Personal messages and OTPs are left out entirely. You will see exactly what it contains before anything is shared.</string>
+    <string name="export_build">Build summary</string>
+    <string name="export_share">Share</string>
+    <string name="export_cancel">Close</string>
+    <string name="export_summary">%1$d distinct shapes from %2$d uncategorised messages</string>
     <string name="scanned">%1$d messages · %2$d uncategorised</string>
 </resources>

@@ -231,27 +231,72 @@ object RuleClassifier {
     }
 
     /**
-     * Scam markers, checked before promotion.
+     * Scam markers, in two tiers.
      *
-     * These are the shapes that actually circulate on Indian numbers: fake
-     * salary and work-from-home bait, lottery wins, pre-approved loans from
-     * senders you have no relationship with. Two signals are required rather
-     * than one, because any single term here also appears in legitimate
-     * messages -- a real employer does mention salary. Requiring a pair keeps
-     * a genuine payroll SMS out of the spam pile.
+     * A flat list with a two-marker threshold produced exactly one spam
+     * message across a real 24,040-message inbox, which is not a believable
+     * number for an Indian phone. Two separate faults caused it.
+     *
+     * First, the terms were contiguous phrases. "pre-approved loan" never
+     * matches "your loan of Rs 5,00,000 is pre-approved" -- the same
+     * word-order brittleness that made a plain UPI debit invisible. These are
+     * regexes now, so order does not matter.
+     *
+     * Second, one threshold cannot fit both kinds of marker. "You have won a
+     * lottery" is conclusive on its own; "salary" is not, because real
+     * payroll messages say it too. So STRONG fires alone and WEAK needs
+     * corroboration, rather than forcing both into one rule that is either
+     * too loose for one or too strict for the other.
      */
-    private val SPAM_WORDS = listOf(
-        "work at home", "work from home", "part time job", "part-time job",
-        "earn daily", "earn upto", "earn up to", "no investment", "daily income",
-        "lottery", "you have won", "claim your prize", "lucky winner",
-        "pre-approved loan", "preapproved loan", "instant loan", "loan approved",
-        "salary was passed", "job offer", "hiring now", "whatsapp.com/send"
+    private val STRONG_SPAM = listOf(
+        Regex("""\byou have won\b""", RegexOption.IGNORE_CASE),
+        Regex("""\b(lottery|kbc|lucky draw|lucky winner)\b""", RegexOption.IGNORE_CASE),
+        Regex("""\bclaim your (prize|reward|cash)\b""", RegexOption.IGNORE_CASE),
+        // KYC / account-blocked phishing: the single most common scam shape
+        // on Indian numbers, and previously not covered at all.
+        // "update" is deliberately absent from this alternation. It also
+        // matches "updated", so including it flagged the entirely legitimate
+        // "Your KYC has been successfully updated" as a scam -- a real bank
+        // message in the spam tab, which is a worse outcome than a missed
+        // scam because it teaches the user to distrust the tab. The
+        // imperative form is caught by the separate update/verify rule below,
+        // which requires the verb to come *before* the noun and so does not
+        // match completion notices.
+        Regex("""\bkyc\b.{0,40}\b(expired?|expiry|pending|suspend|block)""", RegexOption.IGNORE_CASE),
+        Regex("""\b(account|sim|card)\b.{0,30}\bwill be (blocked|suspended|deactivated)""", RegexOption.IGNORE_CASE),
+        Regex("""\b(update|verify)\b.{0,20}\b(kyc|pan|aadhaar)\b""", RegexOption.IGNORE_CASE),
+        Regex("""\bwork (at|from) home\b.{0,40}\b(earn|salary|income|rs)""", RegexOption.IGNORE_CASE),
+        Regex("""\bsalary was passed\b""", RegexOption.IGNORE_CASE)
+    )
+
+    /** Individually ambiguous. Two of these together are a strong signal. */
+    private val WEAK_SPAM = listOf(
+        Regex("""\bwork (at|from) home\b""", RegexOption.IGNORE_CASE),
+        Regex("""\bpart[- ]time\b""", RegexOption.IGNORE_CASE),
+        Regex("""\bearn (daily|upto|up to|monthly)\b""", RegexOption.IGNORE_CASE),
+        Regex("""\bno investment\b""", RegexOption.IGNORE_CASE),
+        Regex("""\bdaily income\b""", RegexOption.IGNORE_CASE),
+        // Flexible word order: matches both "pre-approved loan" and
+        // "loan ... is pre-approved".
+        Regex("""\bloan\b.{0,40}\bpre[- ]?approved\b""", RegexOption.IGNORE_CASE),
+        Regex("""\bpre[- ]?approved\b.{0,40}\bloan\b""", RegexOption.IGNORE_CASE),
+        Regex("""\binstant loan\b""", RegexOption.IGNORE_CASE),
+        Regex("""\bwhatsapp\.com/send""", RegexOption.IGNORE_CASE),
+        Regex("""\b(bit\.ly|tinyurl|cutt\.ly)\b""", RegexOption.IGNORE_CASE),
+        Regex("""\bjob (offer|available|opening)\b""", RegexOption.IGNORE_CASE),
+        Regex("""\bhiring now\b""", RegexOption.IGNORE_CASE),
+        Regex("""\bclick here\b.{0,30}\b(update|verify|claim)""", RegexOption.IGNORE_CASE)
     )
 
     private fun matchSpam(lower: String): Classification? {
-        val hits = SPAM_WORDS.filter { lower.contains(it) }
-        if (hits.size < 2) return null
-        return Classification(Category.SPAM, true, "scam markers: ${hits.take(2).joinToString(", ")}")
+        STRONG_SPAM.firstOrNull { it.containsMatchIn(lower) }?.let {
+            return Classification(Category.SPAM, true, "scam pattern matched")
+        }
+        val weak = WEAK_SPAM.count { it.containsMatchIn(lower) }
+        if (weak >= 2) {
+            return Classification(Category.SPAM, true, "$weak scam markers together")
+        }
+        return null
     }
 
     private val PROMO_WORDS = listOf(
