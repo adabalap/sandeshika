@@ -150,6 +150,8 @@ enum class Tab(val label: String, val categories: Set<Category>) {
     BALANCE("Balance", setOf(Category.BALANCE)),
     OTP("Codes", setOf(Category.OTP)),
     UPDATES("Updates", setOf(Category.DELIVERY, Category.TRAVEL)),
+    SERVICE("Info", setOf(Category.SERVICE)),
+    INSTITUTION("School", setOf(Category.INSTITUTION)),
     PROMOTIONS("Offers", setOf(Category.PROMOTION)),
     SPAM("Spam", setOf(Category.SPAM)),
     PERSONAL("Personal", setOf(Category.PERSONAL)),

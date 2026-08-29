@@ -533,6 +533,8 @@ private fun CategoryChip(cat: Category) {
         Category.TRAVEL -> "Trip" to Color(0xFF117A8B)
         Category.BALANCE -> "Bal" to Color(0xFF7B5E00)
         Category.SPAM -> "Spam" to Color(0xFFB3261E)
+        Category.SERVICE -> "Info" to Color(0xFF4A6FA5)
+        Category.INSTITUTION -> "Inst" to Color(0xFF6B7C3A)
         Category.PERSONAL -> "You" to Color(0xFFB4531A)
         Category.OTHER -> "?" to Color(0xFFB0A99F)
     }

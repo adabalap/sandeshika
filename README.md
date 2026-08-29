@@ -13,7 +13,8 @@ than prototyped and hardened later.
 |---|---|
 | Rule classifier (core logic) | **50 assertions passing** · 16.5% uncategorised on a real 20,261-message inbox |
 | Redaction / corpus export | **42 assertions passing** |
-| Local linear model | designed, not built |
+| Local linear model | **built · 21 assertions passing** |
+| Correction UI and active learning | not started |
 | SMS reading | not started |
 | Compose inbox UI | not started |
 | Medha integration | not started (will use the consent handshake) |
@@ -133,7 +134,26 @@ caught exactly one message in 24,040. Every rule added since has been measured:
 | + SERVICE and INSTITUTION categories | 18.7% |
 | + missed money verbs, unpaid dues, courier vocabulary | **16.5%** |
 
-The remaining misses are a genuine long tail — no single shape above 14
+Adding the learned layer on top, measured the same way:
+
+| Stage | Uncategorised |
+|---|---|
+| rules only | 16.5% |
+| rules + model at the measured margin | **13.0%** |
+
+The model answers 21.6% of the tail and abstains on the rest, at 95% agreement
+on held-out data. An earlier run showed 1.1% uncategorised, which looked far
+better and was not — the abstention margin was miscalibrated and the model was
+answering almost everything. Being wrong quietly on 15% of a tab is worse than
+leaving it uncategorised.
+
+**One caveat that matters:** the model is bootstrapped from rule labels, so
+"95% accuracy" means agreement with the rules. It proves the model learned
+them; it says nothing about the tail, where no rule label exists and where the
+model is actually used. That number stays unvalidated until real corrections
+exist, which is what the active-learning loop is for.
+
+The remaining rule misses are a genuine long tail — no single shape above 14
 messages — which is exactly the boundary where rules stop paying and the
 learned layer starts.
 

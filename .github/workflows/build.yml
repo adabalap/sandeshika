@@ -48,6 +48,15 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - uses: android-actions/setup-android@v3
       - run: chmod +x gradlew
+      # Cheap pre-flight. Catches whole-program errors like a non-exhaustive
+      # `when` in seconds, instead of after a three-minute Gradle build.
+      - name: Set up kotlinc
+        run: |
+          curl -sL -o /tmp/kotlinc.zip https://github.com/JetBrains/kotlin/releases/download/v2.0.21/kotlin-compiler-2.0.21.zip
+          unzip -q /tmp/kotlinc.zip -d /opt
+          echo "/opt/kotlinc/bin" >> $GITHUB_PATH
+      - name: Check Kotlin
+        run: python3 tools/check_kotlin.py
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug --no-daemon
       - name: Stage APK
