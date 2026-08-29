@@ -33,11 +33,25 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.rememberDrawerState
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
 import com.adabala.sandeshika.classify.Category
 import com.adabala.sandeshika.classify.Classification
 import com.adabala.sandeshika.classify.MessageRedactor
+import com.adabala.sandeshika.classify.Dashboard
 import com.adabala.sandeshika.classify.ReviewQueue
+import com.adabala.sandeshika.classify.TransactionParser
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -114,7 +128,7 @@ private fun App() {
     }
 
     if (granted) {
-        InboxScreen()
+        HomeScreen()
     } else {
         PermissionGate(asked) {
             launcher.launch(
@@ -156,9 +170,69 @@ private fun PermissionGate(alreadyAsked: Boolean, onGrant: () -> Unit) {
     }
 }
 
+/**
+ * Drawer, top bar, and whichever surface is selected.
+ *
+ * The scan happens inside [InboxScreen] and is shared by both surfaces rather
+ * than re-run per screen: re-reading 24,000 messages when switching tabs
+ * would be slow, and two surfaces reading at different moments could quietly
+ * disagree with each other.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun InboxScreen() {
+private fun HomeScreen() {
+    val scope = rememberCoroutineScope()
+    val drawer = rememberDrawerState(DrawerValue.Closed)
+    var screen by remember { mutableStateOf(Screen.DASHBOARD) }
+    var showAbout by remember { mutableStateOf(false) }
+
+    if (showAbout) AboutDialog { showAbout = false }
+
+    ModalNavigationDrawer(
+        drawerState = drawer,
+        drawerContent = {
+            ModalDrawerSheet {
+                Column(Modifier.padding(20.dp)) {
+                    Text(
+                        stringResource(R.string.app_name),
+                        fontSize = 20.sp, fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        stringResource(R.string.about_privacy),
+                        fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                HorizontalDivider()
+                NavigationDrawerItem(
+                    label = { Text(stringResource(R.string.nav_dashboard)) },
+                    selected = screen == Screen.DASHBOARD,
+                    onClick = { screen = Screen.DASHBOARD; scope.launch { drawer.close() } },
+                    modifier = Modifier.padding(horizontal = 10.dp)
+                )
+                NavigationDrawerItem(
+                    label = { Text(stringResource(R.string.nav_inbox)) },
+                    selected = screen == Screen.INBOX,
+                    onClick = { screen = Screen.INBOX; scope.launch { drawer.close() } },
+                    modifier = Modifier.padding(horizontal = 10.dp)
+                )
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                NavigationDrawerItem(
+                    label = { Text(stringResource(R.string.nav_about)) },
+                    selected = false,
+                    onClick = { showAbout = true; scope.launch { drawer.close() } },
+                    modifier = Modifier.padding(horizontal = 10.dp)
+                )
+            }
+        }
+    ) {
+        InboxScreen(screen = screen, onOpenDrawer = { scope.launch { drawer.open() } })
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun InboxScreen(screen: Screen = Screen.INBOX, onOpenDrawer: () -> Unit = {}) {
     val context = LocalContext.current
     var messages by remember { mutableStateOf<List<ClassifiedSms>?>(null) }
     var selectedTab by remember { mutableStateOf(Tab.ALL) }
@@ -282,6 +356,11 @@ private fun InboxScreen() {
                             }
                         }
                     },
+                    navigationIcon = {
+                        IconButton(onClick = onOpenDrawer) {
+                            Icon(Icons.Filled.Menu, contentDescription = stringResource(R.string.menu))
+                        }
+                    },
                     actions = {
                         TextButton(onClick = { showReview = true }) {
                             Text(stringResource(R.string.review))
@@ -298,6 +377,7 @@ private fun InboxScreen() {
                         titleContentColor = MaterialTheme.colorScheme.onSurface
                     )
                 )
+                if (screen == Screen.INBOX) {
                 TabRowScrollable(selectedTab, all) { selectedTab = it }
                 Text(
                     stringResource(R.string.long_press_hint),
@@ -305,10 +385,28 @@ private fun InboxScreen() {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 6.dp)
                 )
+                }
             }
         }
     ) { pad ->
         Box(Modifier.padding(pad).fillMaxSize()) {
+            if (screen == Screen.DASHBOARD && all != null) {
+                val stats = remember(all) {
+                    Dashboard.compute(all.map { Triple(it.sms, it.classification, it.sms.receivedAt) })
+                }
+                val queue = remember(all) {
+                    ReviewQueue.build(
+                        all.map { Triple(it.shapeKey, it.sms, it.classification) },
+                        alreadyCorrected = store.all().keys + skipped
+                    )
+                }
+                DashboardScreen(
+                    stats = stats,
+                    onOpenReview = { showReview = true },
+                    reviewReach = queue.size to ReviewQueue.reach(queue)
+                )
+                return@Box
+            }
             when {
                 all == null -> Box(Modifier.fillMaxSize(), Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -703,6 +801,172 @@ private fun CorrectionDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.correct_cancel)) }
+        }
+    )
+}
+
+/** Which top-level surface is showing. */
+private enum class Screen { DASHBOARD, INBOX }
+
+/**
+ * The dashboard.
+ *
+ * Every money figure comes from the deterministic parser and nothing else,
+ * and the count of transactions it could *not* read is shown right next to
+ * the total. A number on a screen gets believed — nobody can sanity-check a
+ * spending figure derived from 24,000 messages — so the honest move is to
+ * state its coverage rather than let it imply completeness it does not have.
+ */
+@Composable
+private fun DashboardScreen(stats: Dashboard.Stats, onOpenReview: () -> Unit, reviewReach: Pair<Int, Int>) {
+    LazyColumn(
+        contentPadding = PaddingValues(14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item {
+            // Spending is the headline because it is the question people
+            // actually open an SMS organiser to answer.
+            Surface(
+                shape = RoundedCornerShape(18.dp),
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.padding(18.dp)) {
+                    Text(
+                        stringResource(R.string.dash_spend_title),
+                        fontSize = 12.5.sp, color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f)
+                    )
+                    Text(
+                        Dashboard.formatRupees(stats.spentThisMonth),
+                        fontSize = 34.sp, fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                    Text(
+                        stringResource(R.string.dash_spend_sub, stats.spendCount),
+                        fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.75f)
+                    )
+                    if (stats.unparsedTransactions > 0) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            stringResource(R.string.dash_unparsed, stats.unparsedTransactions),
+                            fontSize = 10.5.sp,
+                            color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f)
+                        )
+                    }
+                }
+            }
+        }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                StatTile(
+                    stringResource(R.string.dash_received),
+                    Dashboard.formatRupees(stats.receivedThisMonth),
+                    Modifier.weight(1f)
+                )
+                StatTile(
+                    stringResource(R.string.dash_bills),
+                    stats.billCount.toString(),
+                    Modifier.weight(1f)
+                )
+            }
+        }
+        if (reviewReach.first > 0) {
+            item {
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    modifier = Modifier.fillMaxWidth().clickable { onOpenReview() }
+                ) {
+                    Column(Modifier.padding(14.dp)) {
+                        Text(
+                            stringResource(R.string.dash_needs_you),
+                            fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            stringResource(R.string.dash_needs_sub, reviewReach.first, reviewReach.second),
+                            fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+        item {
+            Text(
+                stringResource(R.string.dash_breakdown),
+                fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+        items(stats.byCategory) { (cat, count) ->
+            val share = if (stats.totalMessages > 0) count.toFloat() / stats.totalMessages else 0f
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CategoryChip(cat)
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        cat.name.lowercase().replaceFirstChar { it.uppercase() },
+                        fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        count.toString(),
+                        fontSize = 12.5.sp, fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Spacer(Modifier.height(4.dp))
+                LinearProgressIndicator(
+                    progress = { share },
+                    modifier = Modifier.fillMaxWidth().height(4.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatTile(label: String, value: String, modifier: Modifier = Modifier) {
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+        modifier = modifier
+    ) {
+        Column(Modifier.padding(14.dp)) {
+            Text(label, fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                value, fontSize = 20.sp, fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+    }
+}
+
+@Composable
+private fun AboutDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.about_title)) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text(stringResource(R.string.about_body), fontSize = 13.sp)
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    stringResource(R.string.about_privacy),
+                    fontSize = 12.5.sp, fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    stringResource(R.string.about_version, BuildConfig.VERSION_NAME),
+                    fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.export_cancel)) }
         }
     )
 }

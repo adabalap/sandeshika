@@ -21,6 +21,11 @@ android {
 
     buildFeatures {
         compose = true
+        // Required for BuildConfig.VERSION_NAME, used on the About screen.
+        // Not on by default since AGP 8, and its absence fails only at the
+        // reference site with an unresolved-symbol error that reads like a
+        // missing import.
+        buildConfig = true
     }
 
     buildTypes {

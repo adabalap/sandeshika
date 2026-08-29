@@ -16,6 +16,8 @@ than prototyped and hardened later.
 | Local linear model | **built · 21 assertions passing** |
 | Corrections (storage + override + UI) | **built** |
 | Active learning (review queue) | **built · 12 assertions passing** |
+| Transaction parsing | **built · 19 assertions · 70.5% of transaction messages parsed** |
+| Dashboard, drawer, About | **built · 17 assertions** |
 | SMS reading | not started |
 | Compose inbox UI | not started |
 | Medha integration | not started (will use the consent handshake) |
@@ -202,6 +204,31 @@ the script. It is precisely what the character n-gram features exist for: the
 model can learn these shapes from a handful of corrections without anyone
 writing a rule, which is a point in favour of the architecture rather than
 against it.
+
+## The dashboard, and why it states its own coverage
+
+Spending is the headline figure, and it is computed only from
+`TransactionParser` — never estimated, never inferred from context. The number
+of transaction messages the parser *could not* read is shown directly beneath
+it.
+
+That is deliberate. A figure on a screen gets believed, and nobody can
+sanity-check a total derived from 24,000 messages by eye. Stating coverage is
+the difference between a number someone can reason about and one that quietly
+implies completeness it does not have. Currently 70.5% of transaction messages
+parse; the rest are excluded and counted.
+
+Three traps the parser handles, each of which produces a wrong total in
+silence:
+
+- **The balance is not the amount.** "Rs 500 debited. Avl bal: Rs 2,000" has
+  two figures and one transaction. Balance clauses are stripped before any
+  amount is read.
+- **Self-transfers are not spending.** Moving money between your own accounts
+  produces a debit and a credit; counting the debit inflated a daily total
+  from ₹8,478 to ₹13,478 in an earlier build.
+- **`Rs.5000` is not 500.** A regex alternation split that number once and
+  shipped a factor-of-ten error.
 
 ## Design commitments
 

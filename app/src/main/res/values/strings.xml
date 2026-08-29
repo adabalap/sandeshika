@@ -10,6 +10,30 @@
     <string name="rescan">Rescan</string>
     <string name="export">Export shapes</string>
     <string name="review">Review</string>
+    <string name="menu">Menu</string>
+    <string name="nav_dashboard">Dashboard</string>
+    <string name="nav_inbox">Inbox</string>
+    <string name="nav_review">Teach the app</string>
+    <string name="nav_export">Export shapes</string>
+    <string name="nav_about">About</string>
+    <string name="nav_rescan">Rescan inbox</string>
+
+    <string name="dash_spend_title">Spent this month</string>
+    <string name="dash_spend_sub">from %1$d parsed transactions</string>
+    <string name="dash_received">Received</string>
+    <string name="dash_bills">Bills and dues</string>
+    <string name="dash_bills_sub">%1$d messages mentioning something owed</string>
+    <string name="dash_needs_you">Needs your input</string>
+    <string name="dash_needs_sub">%1$d shapes · covers %2$d messages</string>
+    <string name="dash_breakdown">Where your messages go</string>
+    <string name="dash_top_payees">Most frequent</string>
+    <string name="dash_scanned">%1$d messages · %2$d uncategorised</string>
+    <string name="dash_unparsed">%1$d transactions could not be read and are excluded</string>
+
+    <string name="about_title">About Sandeshika</string>
+    <string name="about_body">An SMS organiser that works entirely on this phone.\n\nMessages are read from your inbox, sorted by rules that run locally, and never uploaded. There is no account, no server, and no analytics.\n\nCategories you correct are remembered and used to teach a small model that also runs here.</string>
+    <string name="about_privacy">Nothing leaves this device unless you explicitly share it.</string>
+    <string name="about_version">Version %1$s</string>
     <string name="review_title">Teach the app</string>
     <string name="review_reach">%1$d shapes worth labelling · covers %2$d messages</string>
     <string name="review_empty">Nothing needs your input right now.</string>
