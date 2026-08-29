@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <!--
-      A bare theme with no ActionBar: Compose draws its own scaffolding, and
-      a platform ActionBar on top of a Material3 TopAppBar gives you two.
-    -->
-    <style name="Theme.Sandeshika" parent="android:Theme.Material.NoActionBar" />
-</resources>

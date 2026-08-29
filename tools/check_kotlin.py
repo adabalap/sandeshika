@@ -69,6 +69,45 @@ CLASSPATH_NOISE = [
 ]
 
 
+def duplicate_imports(sources):
+    """
+    Finds imports repeated within a file, and clashing simple names.
+
+    Needs no compiler, which is the point. Without android.jar an import of
+    `android.content.Intent` does not resolve at all, so importing it twice
+    produces no conflict here and the error only appears in CI where the
+    symbol is real. A text scan sees it either way.
+
+    Two distinct problems are reported. An exact repeat is harmless to the
+    compiler but always accidental. Two different packages offering the same
+    simple name is a genuine ambiguity error.
+    """
+    problems = []
+    for path in sources:
+        seen = {}
+        with open(path, encoding="utf-8") as fh:
+            for n, line in enumerate(fh, 1):
+                line = line.strip()
+                if not line.startswith("import "):
+                    continue
+                full = line[len("import "):].split(" as ")[0].strip()
+                simple = full.rsplit(".", 1)[-1]
+                if simple == "*":
+                    continue
+                if simple in seen:
+                    prev_full, prev_line = seen[simple]
+                    if prev_full == full:
+                        problems.append(f"{path}:{n}: duplicate import '{full}' (also line {prev_line})")
+                    else:
+                        problems.append(
+                            f"{path}:{n}: ambiguous import '{simple}' "
+                            f"-- '{full}' clashes with '{prev_full}' on line {prev_line}"
+                        )
+                else:
+                    seen[simple] = (full, n)
+    return problems
+
+
 def declared_in_file(path):
     """
     Names declared anywhere in one file: types, functions, properties.
@@ -115,6 +154,13 @@ def main():
     )
     if not sources:
         print("no Kotlin sources found")
+        return 1
+
+    dupes = duplicate_imports(sources)
+    if dupes:
+        print(f"Import problems ({len(dupes)}):\n")
+        for d in dupes:
+            print(" ", d)
         return 1
 
     with tempfile.TemporaryDirectory() as out:

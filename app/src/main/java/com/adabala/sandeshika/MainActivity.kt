@@ -2,6 +2,7 @@ package com.adabala.sandeshika
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -47,8 +48,6 @@ import androidx.compose.material3.LinearProgressIndicator
 import com.adabala.sandeshika.classify.Category
 import com.adabala.sandeshika.classify.Classification
 import com.adabala.sandeshika.classify.MessageRedactor
-import android.content.Intent
-import androidx.activity.compose.rememberLauncherForActivityResult
 import com.adabala.sandeshika.classify.Dashboard
 import com.adabala.sandeshika.classify.DueDateParser
 import com.adabala.sandeshika.classify.QuestionRouter
