@@ -34,6 +34,7 @@ import androidx.core.content.ContextCompat
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import com.adabala.sandeshika.classify.Category
+import com.adabala.sandeshika.classify.Classification
 import com.adabala.sandeshika.classify.MessageRedactor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext

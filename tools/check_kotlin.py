@@ -35,7 +35,10 @@ import tempfile
 # and the AndroidX libraries. Each needs a reason, so that nothing is added
 # here just to make the output quiet.
 CLASSPATH_NOISE = [
-    # The dependency itself is missing, so its symbols cannot resolve.
+    # Symbols from absent libraries. NOTE: this is narrowed at runtime --
+    # unresolved references naming a type this project declares are treated
+    # as real, because the project's own sources are all present here and so
+    # such a reference means a genuinely missing import. See project_symbols().
     r"unresolved reference",
     # Follows directly from an unresolved receiver type.
     r"cannot infer type for this parameter",
@@ -66,6 +69,20 @@ CLASSPATH_NOISE = [
 ]
 
 
+def project_symbols(sources):
+    """Top-level types this project declares, by simple name."""
+    names = set()
+    decl = re.compile(
+        r"^\s*(?:public |internal |private |abstract |open |sealed |data |value )*"
+        r"(?:class|interface|object|enum class)\s+([A-Z]\w*)",
+        re.MULTILINE,
+    )
+    for path in sources:
+        with open(path, encoding="utf-8") as fh:
+            names.update(decl.findall(fh.read()))
+    return names
+
+
 def main():
     if not shutil.which("kotlinc"):
         print("kotlinc not on PATH - skipping. Install it to run this check.")
@@ -87,11 +104,24 @@ def main():
         )
 
     noise = re.compile("|".join(CLASSPATH_NOISE), re.IGNORECASE)
-    real = [
-        line
-        for line in (proc.stdout + proc.stderr).splitlines()
-        if "error:" in line and not noise.search(line)
-    ]
+    ours = project_symbols(sources)
+    named = re.compile(r"unresolved reference '([A-Za-z_][\w]*)'")
+
+    real = []
+    for line in (proc.stdout + proc.stderr).splitlines():
+        if "error:" not in line:
+            continue
+        # An unresolved reference to one of *our own* declarations is never
+        # classpath noise: every project source is on this compile line, so
+        # the only way it fails to resolve is a missing import. This is the
+        # case the blanket "unresolved reference" filter used to swallow, and
+        # it let a missing `import Classification` reach CI.
+        m = named.search(line)
+        if m and m.group(1) in ours:
+            real.append(line)
+            continue
+        if not noise.search(line):
+            real.append(line)
 
     if real:
         print(f"Kotlin errors not explained by the missing Android classpath ({len(real)}):\n")
