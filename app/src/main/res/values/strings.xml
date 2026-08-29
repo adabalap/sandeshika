@@ -9,6 +9,14 @@
     <string name="loading">Reading your inbox…</string>
     <string name="rescan">Rescan</string>
     <string name="export">Export shapes</string>
+    <string name="correct_title">What is this really?</string>
+    <string name="correct_hint">This applies to all %1$d messages with the same wording, and teaches the app for future ones.</string>
+    <string name="correct_hint_single">This teaches the app how to file messages like this one.</string>
+    <string name="correct_clear">Remove my correction</string>
+    <string name="correct_cancel">Cancel</string>
+    <string name="corrected_badge">corrected by you</string>
+    <string name="correct_done">Filed as %1$s</string>
+    <string name="long_press_hint">Long-press any message to correct how it is filed.</string>
     <string name="export_title">Export for tuning</string>
     <string name="export_body">Builds a redacted summary of the messages that could not be categorised, so the rules can be improved.\n\nAmounts, account numbers, names, phone numbers, dates and links are replaced with placeholders. Personal messages and OTPs are left out entirely. Names from your contacts are removed from every message. You will see exactly what it contains before anything is shared, and can add any words the rules missed.</string>
     <string name="export_build">Build summary</string>

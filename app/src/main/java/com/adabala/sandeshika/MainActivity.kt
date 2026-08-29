@@ -10,7 +10,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -173,6 +175,37 @@ private fun InboxScreen() {
     val all = messages
     var expanded by remember { mutableStateOf<String?>(null) }
     var showExport by remember { mutableStateOf(false) }
+    var correcting by remember { mutableStateOf<ClassifiedSms?>(null) }
+    val store = remember { CorrectionStore(context) }
+
+    correcting?.let { target ->
+        CorrectionDialog(
+            target = target,
+            sameShapeCount = all?.count { it.shapeKey == target.shapeKey } ?: 1,
+            hasExisting = store.all().containsKey(target.shapeKey),
+            onPick = { chosen ->
+                store.save(target.shapeKey, chosen, target.sms.body)
+                // Applied in memory immediately rather than by rescanning.
+                // A rescan of 24,000 messages to reflect one tap would make
+                // correcting feel expensive, and the whole point is that it
+                // should feel cheap enough to do often.
+                messages = all?.map { m ->
+                    if (m.shapeKey == target.shapeKey) {
+                        m.copy(classification = Classification(chosen, true, CORRECTED_REASON))
+                    } else {
+                        m
+                    }
+                }
+                correcting = null
+            },
+            onClear = {
+                store.delete(target.shapeKey)
+                correcting = null
+                reloadKey++
+            },
+            onDismiss = { correcting = null }
+        )
+    }
 
     if (showExport && all != null) {
         ExportDialog(
@@ -233,6 +266,12 @@ private fun InboxScreen() {
                     )
                 )
                 TabRowScrollable(selectedTab, all) { selectedTab = it }
+                Text(
+                    stringResource(R.string.long_press_hint),
+                    fontSize = 10.5.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 6.dp)
+                )
             }
         }
     ) { pad ->
@@ -261,7 +300,8 @@ private fun InboxScreen() {
                             isExpanded = expanded == group.sender,
                             onToggle = {
                                 expanded = if (expanded == group.sender) null else group.sender
-                            }
+                            },
+                            onCorrect = { correcting = it }
                         )
                     }
                 }
@@ -438,6 +478,91 @@ private fun ExportDialog(
     )
 }
 
+/** Reason string shown on a message the user has filed themselves. */
+private const val CORRECTED_REASON = "you corrected this"
+
+/**
+ * Category picker for a single message shape.
+ *
+ * Shows how many messages the correction will affect, because the honest
+ * answer is often "311" and that changes whether someone wants to do it. A
+ * picker that silently re-labelled hundreds of messages would be a worse
+ * feature than one that asks.
+ *
+ * OTHER is deliberately absent from the options. "Uncategorised" is what the
+ * app says when it does not know; a person choosing it as an answer is really
+ * saying "none of these fit", which is feedback worth having but is not the
+ * same thing and should not be stored as if it were a label.
+ */
+@Composable
+private fun CorrectionDialog(
+    target: ClassifiedSms,
+    sameShapeCount: Int,
+    hasExisting: Boolean,
+    onPick: (Category) -> Unit,
+    onClear: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.correct_title)) },
+        text = {
+            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                Text(
+                    target.sms.body.take(160),
+                    fontSize = 12.5.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    if (sameShapeCount > 1) {
+                        stringResource(R.string.correct_hint, sameShapeCount)
+                    } else {
+                        stringResource(R.string.correct_hint_single)
+                    },
+                    fontSize = 11.5.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(12.dp))
+                Category.values().filter { it != Category.OTHER }.forEach { cat ->
+                    val selected = cat == target.classification.category
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                                else MaterialTheme.colorScheme.surface,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp)
+                            .clickable { onPick(cat) }
+                    ) {
+                        Row(
+                            Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            CategoryChip(cat)
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                cat.name.lowercase().replaceFirstChar { it.uppercase() },
+                                fontSize = 14.sp,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (hasExisting) {
+                TextButton(onClick = onClear) { Text(stringResource(R.string.correct_clear)) }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.correct_cancel)) }
+        }
+    )
+}
+
 private data class SenderGroup(val sender: String, val messages: List<ClassifiedSms>)
 
 /**
@@ -447,13 +572,27 @@ private data class SenderGroup(val sender: String, val messages: List<Classified
  * what someone scanning a tab actually needs. Expanding is opt-in because at
  * 24,000 messages the default has to be "show me less".
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun SenderGroupCard(group: SenderGroup, isExpanded: Boolean, onToggle: () -> Unit) {
+private fun SenderGroupCard(
+    group: SenderGroup,
+    isExpanded: Boolean,
+    onToggle: () -> Unit,
+    onCorrect: (ClassifiedSms) -> Unit
+) {
     val newest = group.messages.first()
     Surface(
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-        modifier = Modifier.fillMaxWidth().clickable { onToggle() }
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                onClick = onToggle,
+                // Long-press corrects the newest message in the collapsed
+                // view, or the specific message when expanded. Tap stays
+                // expand/collapse, because that is what people try first.
+                onLongClick = { onCorrect(newest) }
+            )
     ) {
         Column(Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -488,7 +627,11 @@ private fun SenderGroupCard(group: SenderGroup, isExpanded: Boolean, onToggle: (
             Spacer(Modifier.height(6.dp))
             if (isExpanded) {
                 group.messages.forEach { m ->
-                    Column(Modifier.padding(top = 8.dp)) {
+                    Column(
+                        Modifier
+                            .padding(top = 8.dp)
+                            .combinedClickable(onClick = {}, onLongClick = { onCorrect(m) })
+                    ) {
                         Text(
                             formatWhen(m.sms.receivedAt),
                             fontSize = 10.sp,
@@ -517,7 +660,12 @@ private fun SenderGroupCard(group: SenderGroup, isExpanded: Boolean, onToggle: (
                 Text(
                     newest.classification.why +
                         if (!newest.classification.confident) " · low confidence" else "",
-                    fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                    fontSize = 10.5.sp,
+                    fontWeight = if (newest.classification.why == CORRECTED_REASON)
+                        FontWeight.Bold else FontWeight.Normal,
+                    color = if (newest.classification.why == CORRECTED_REASON)
+                        MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }

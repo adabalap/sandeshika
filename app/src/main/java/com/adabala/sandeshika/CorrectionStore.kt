@@ -82,7 +82,7 @@ class CorrectionStore(context: Context) : SQLiteOpenHelper(
         cache = null
     }
 
-    fun remove(shapeKey: String) {
+    fun delete(shapeKey: String) {
         writableDatabase.delete("corrections", "shape_key = ?", arrayOf(shapeKey))
         cache = null
     }

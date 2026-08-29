@@ -14,7 +14,8 @@ than prototyped and hardened later.
 | Rule classifier (core logic) | **50 assertions passing** · 16.5% uncategorised on a real 20,261-message inbox |
 | Redaction / corpus export | **42 assertions passing** |
 | Local linear model | **built · 21 assertions passing** |
-| Correction UI and active learning | not started |
+| Corrections (storage + override + UI) | **built** |
+| Active learning | not started |
 | SMS reading | not started |
 | Compose inbox UI | not started |
 | Medha integration | not started (will use the consent handshake) |
@@ -156,6 +157,29 @@ exist, which is what the active-learning loop is for.
 The remaining rule misses are a genuine long tail — no single shape above 14
 messages — which is exactly the boundary where rules stop paying and the
 learned layer starts.
+
+## The correction loop
+
+Long-press any message, pick the right category. The correction is stored
+against the message *shape*, not the message, so correcting one of 311
+near-identical offers re-labels all of them — the dialog says how many it will
+affect, because that number often changes whether someone wants to proceed.
+
+Corrections sit above the rules, not beside them:
+
+```
+your correction  ->  rules  ->  learned model  ->  uncategorised
+```
+
+An explicit instruction has to win. Feeding corrections only into training
+would turn "this is a bill" into a statistical hint that might lose to a rule,
+and the app would visibly disagree with something the user just told it.
+
+They are also training examples, so a correction on one shape helps with
+similar messages the app has not seen. And `OTHER` is deliberately not
+offerable as a choice: "uncategorised" is what the app says when it does not
+know, and a person picking it means "none of these fit" — real feedback, but
+not a label, and it should not be stored as one.
 
 ## Design commitments
 
