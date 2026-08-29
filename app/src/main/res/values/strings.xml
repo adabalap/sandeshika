@@ -9,6 +9,15 @@
     <string name="loading">Reading your inbox…</string>
     <string name="rescan">Rescan</string>
     <string name="export">Export shapes</string>
+    <string name="review">Review</string>
+    <string name="review_title">Teach the app</string>
+    <string name="review_reach">%1$d shapes worth labelling · covers %2$d messages</string>
+    <string name="review_empty">Nothing needs your input right now.</string>
+    <string name="review_impact">%1$d messages like this</string>
+    <string name="review_guess">Guessed: %1$s</string>
+    <string name="review_unknown">Could not categorise</string>
+    <string name="review_skip">Skip</string>
+    <string name="review_close">Done</string>
     <string name="correct_title">What is this really?</string>
     <string name="correct_hint">This applies to all %1$d messages with the same wording, and teaches the app for future ones.</string>
     <string name="correct_hint_single">This teaches the app how to file messages like this one.</string>

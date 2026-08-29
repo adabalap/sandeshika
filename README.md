@@ -15,7 +15,7 @@ than prototyped and hardened later.
 | Redaction / corpus export | **42 assertions passing** |
 | Local linear model | **built · 21 assertions passing** |
 | Corrections (storage + override + UI) | **built** |
-| Active learning | not started |
+| Active learning (review queue) | **built · 12 assertions passing** |
 | SMS reading | not started |
 | Compose inbox UI | not started |
 | Medha integration | not started (will use the consent handshake) |
@@ -180,6 +180,28 @@ similar messages the app has not seen. And `OTHER` is deliberately not
 offerable as a choice: "uncategorised" is what the app says when it does not
 know, and a person picking it means "none of these fit" — real feedback, but
 not a label, and it should not be stored as one.
+
+## Two findings from a real 20,261-message inbox
+
+**The tail is flat, so active learning has limited leverage.** The top 20
+shapes worth labelling cover only ~2.5% of the messages needing attention —
+there is no small set of big templates left to fix, just several thousand
+near-singletons. The review queue is still worth having, because every label
+also becomes model training data and so helps beyond the shape it was given
+for. But it is not a button that fixes the inbox in one sitting, and building
+it to look like one would only teach people the app overpromises.
+
+**Indic-script messages are effectively invisible to the rules.** 119
+templates covering 218 messages are in Telugu or Devanagari, and every rule in
+the classifier is an English keyword — so 75 of them land in "uncategorised"
+by construction and the rest match only incidentally.
+
+This is not a gap that more rules should close. Hand-writing Telugu keyword
+lists would be slow, partial, and unmaintainable by anyone who does not read
+the script. It is precisely what the character n-gram features exist for: the
+model can learn these shapes from a handful of corrections without anyone
+writing a rule, which is a point in favour of the architecture rather than
+against it.
 
 ## Design commitments
 

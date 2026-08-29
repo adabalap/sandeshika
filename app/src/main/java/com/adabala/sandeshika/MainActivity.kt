@@ -36,6 +36,7 @@ import androidx.compose.ui.res.stringResource
 import com.adabala.sandeshika.classify.Category
 import com.adabala.sandeshika.classify.Classification
 import com.adabala.sandeshika.classify.MessageRedactor
+import com.adabala.sandeshika.classify.ReviewQueue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -177,6 +178,31 @@ private fun InboxScreen() {
     var expanded by remember { mutableStateOf<String?>(null) }
     var showExport by remember { mutableStateOf(false) }
     var correcting by remember { mutableStateOf<ClassifiedSms?>(null) }
+    var showReview by remember { mutableStateOf(false) }
+    var skipped by remember { mutableStateOf(setOf<String>()) }
+
+    if (showReview && all != null) {
+        ReviewDialog(
+            messages = all,
+            corrected = store.all().keys + skipped,
+            onLabel = { candidate, chosen ->
+                store.save(candidate.shapeKey, chosen, candidate.sample.body)
+                messages = all.map { m ->
+                    if (m.shapeKey == candidate.shapeKey) {
+                        m.copy(classification = Classification(chosen, true, CORRECTED_REASON))
+                    } else {
+                        m
+                    }
+                }
+            },
+            // Skipping is remembered for the session only. A shape someone
+            // passed over today may be worth asking about once the model has
+            // changed around it, and persisting the skip would silently
+            // remove it from view forever.
+            onSkip = { skipped = skipped + it.shapeKey },
+            onDismiss = { showReview = false }
+        )
+    }
     val store = remember { CorrectionStore(context) }
 
     correcting?.let { target ->
@@ -254,6 +280,9 @@ private fun InboxScreen() {
                         }
                     },
                     actions = {
+                        TextButton(onClick = { showReview = true }) {
+                            Text(stringResource(R.string.review))
+                        }
                         TextButton(onClick = { showExport = true }) {
                             Text(stringResource(R.string.export))
                         }
@@ -475,6 +504,117 @@ private fun ExportDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.export_cancel)) }
+        }
+    )
+}
+
+/**
+ * Focused labelling flow: one message shape at a time, highest value first.
+ *
+ * A list would let people browse; a single card makes the decision small
+ * enough to actually make. The header states the reach of the whole queue,
+ * because "20 shapes covering 1,847 messages" is a reason to start and an
+ * unbounded list of problems is a reason not to.
+ *
+ * Honest about leverage: on a real inbox the top 20 shapes covered only ~2.5%
+ * of what needed attention, because that tail is genuinely flat rather than
+ * a few big templates. This is worth doing — every label also becomes model
+ * training data, so it helps beyond the shape it was given for — but it is
+ * not a button that fixes the inbox in one sitting, and presenting it as one
+ * would just teach people the app overpromises.
+ */
+@Composable
+private fun ReviewDialog(
+    messages: List<ClassifiedSms>,
+    corrected: Set<String>,
+    onLabel: (ReviewQueue.Candidate, Category) -> Unit,
+    onSkip: (ReviewQueue.Candidate) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val queue = remember(messages, corrected) {
+        ReviewQueue.build(
+            messages.map { Triple(it.shapeKey, it.sms, it.classification) },
+            alreadyCorrected = corrected
+        )
+    }
+    val current = queue.firstOrNull()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.review_title)) },
+        text = {
+            Column(Modifier.heightIn(max = 430.dp).verticalScroll(rememberScrollState())) {
+                if (current == null) {
+                    Text(stringResource(R.string.review_empty), fontSize = 13.sp)
+                    return@Column
+                }
+                Text(
+                    stringResource(R.string.review_reach, queue.size, ReviewQueue.reach(queue)),
+                    fontSize = 11.5.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(10.dp))
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                ) {
+                    Column(Modifier.padding(10.dp)) {
+                        Text(
+                            current.sample.sender,
+                            fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            current.sample.body.take(220),
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    stringResource(R.string.review_impact, current.impact) + " · " +
+                        (current.suggested?.let {
+                            stringResource(R.string.review_guess, it.name.lowercase())
+                        } ?: stringResource(R.string.review_unknown)),
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(10.dp))
+                Category.values().filter { it != Category.OTHER }.forEach { cat ->
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp)
+                            .clickable { onLabel(current, cat) }
+                    ) {
+                        Row(
+                            Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            CategoryChip(cat)
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                cat.name.lowercase().replaceFirstChar { it.uppercase() },
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (current != null) {
+                TextButton(onClick = { onSkip(current) }) {
+                    Text(stringResource(R.string.review_skip))
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.review_close)) }
         }
     )
 }
