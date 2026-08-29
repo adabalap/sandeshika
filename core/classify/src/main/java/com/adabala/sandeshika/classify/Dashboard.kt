@@ -28,14 +28,26 @@ object Dashboard {
         val unparsedTransactions: Int,
         val billCount: Int,
         val byCategory: List<Pair<Category, Int>>,
-        val topCounterparties: List<Pair<String, Int>>
+        val topCounterparties: List<Pair<String, Int>>,
+        /** Spending since midnight, the figure people check most often. */
+        val spentToday: Double,
+        val todayCount: Int,
+        /** Individual spends today, newest first, for the drill-down. */
+        val todaySpends: List<Spend>,
+        val upcomingDues: List<DueDateParser.Due>
     )
+
+    data class Spend(val amount: Double, val counterparty: String?, val at: Long, val body: String)
 
     fun compute(
         items: List<Triple<Sms, Classification, Long>>,
         now: Long = System.currentTimeMillis()
     ): Stats {
         val monthStart = startOfMonth(now)
+        val dayStart = startOfDay(now)
+        var spentToday = 0.0
+        var todayCount = 0
+        val todaySpends = mutableListOf<Spend>()
         var spent = 0.0
         var received = 0.0
         var spendCount = 0
@@ -61,7 +73,13 @@ object Dashboard {
             // between months in ways nobody can audit.
             if (receivedAt < monthStart) continue
             when {
-                txn.isSpend -> { spent += txn.amount; spendCount++ }
+                txn.isSpend -> {
+                    spent += txn.amount; spendCount++
+                    if (receivedAt >= dayStart) {
+                        spentToday += txn.amount; todayCount++
+                        todaySpends.add(Spend(txn.amount, txn.counterparty, receivedAt, sms.body))
+                    }
+                }
                 txn.direction == TransactionParser.Direction.CREDIT -> received += txn.amount
                 // Self-transfers land here and are counted in neither, which
                 // is the whole point of detecting them.
@@ -78,9 +96,21 @@ object Dashboard {
             billCount = byCat[Category.BILL] ?: 0,
             byCategory = byCat.entries.sortedByDescending { it.value }.map { it.key to it.value },
             topCounterparties = counterparties.entries
-                .sortedByDescending { it.value }.take(5).map { it.key to it.value }
+                .sortedByDescending { it.value }.take(5).map { it.key to it.value },
+            spentToday = spentToday,
+            todayCount = todayCount,
+            todaySpends = todaySpends.sortedByDescending { it.at },
+            upcomingDues = DueDateParser.upcoming(
+                items.map { it.first to it.second }, now
+            )
         )
     }
+
+    private fun startOfDay(now: Long): Long = Calendar.getInstance().apply {
+        timeInMillis = now
+        set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+    }.timeInMillis
 
     private fun startOfMonth(now: Long): Long = Calendar.getInstance().apply {
         timeInMillis = now

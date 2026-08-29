@@ -50,6 +50,7 @@ import com.adabala.sandeshika.classify.MessageRedactor
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import com.adabala.sandeshika.classify.Dashboard
+import com.adabala.sandeshika.classify.DueDateParser
 import com.adabala.sandeshika.classify.QuestionRouter
 import com.adabala.sandeshika.classify.ReviewQueue
 import com.adabala.sandeshika.classify.TransactionParser
@@ -1011,43 +1012,93 @@ private enum class Screen { DASHBOARD, INBOX, ASK }
  */
 @Composable
 private fun DashboardScreen(stats: Dashboard.Stats, onOpenReview: () -> Unit, reviewReach: Pair<Int, Int>) {
+    var showToday by remember { mutableStateOf(false) }
+
+    if (showToday) {
+        TodaySpendDialog(stats) { showToday = false }
+    }
+
     LazyColumn(
         contentPadding = PaddingValues(14.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            // Spending is the headline because it is the question people
-            // actually open an SMS organiser to answer.
+            // Today leads, not the month. "What have I spent today" is the
+            // question with a decision attached to it; the monthly figure is
+            // context and sits below.
             Surface(
                 shape = RoundedCornerShape(18.dp),
                 color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth().clickable { showToday = true }
             ) {
                 Column(Modifier.padding(18.dp)) {
+                    Text(
+                        stringResource(R.string.dash_today),
+                        fontSize = 12.5.sp,
+                        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f)
+                    )
+                    Text(
+                        Dashboard.formatRupees(stats.spentToday),
+                        fontSize = 38.sp, fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                    Text(
+                        if (stats.todayCount == 0) stringResource(R.string.dash_today_none)
+                        else stringResource(R.string.dash_today_sub, stats.todayCount),
+                        fontSize = 11.5.sp,
+                        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.75f)
+                    )
+                }
+            }
+        }
+        item {
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.padding(14.dp)) {
                     Text(
                         stringResource(R.string.dash_spend_title),
                         fontSize = 12.5.sp, color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f)
                     )
                     Text(
                         Dashboard.formatRupees(stats.spentThisMonth),
-                        fontSize = 34.sp, fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onPrimary
+                        fontSize = 26.sp, fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
                         stringResource(R.string.dash_spend_sub, stats.spendCount),
-                        fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.75f)
+                        fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     if (stats.unparsedTransactions > 0) {
-                        Spacer(Modifier.height(6.dp))
+                        Spacer(Modifier.height(4.dp))
                         Text(
                             stringResource(R.string.dash_unparsed, stats.unparsedTransactions),
                             fontSize = 10.5.sp,
-                            color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f)
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
             }
         }
+        // Upcoming dues: the other thing with a deadline attached.
+        item {
+            Text(
+                stringResource(R.string.dash_due_title),
+                fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+        if (stats.upcomingDues.isEmpty()) {
+            item {
+                Text(
+                    stringResource(R.string.dash_due_none),
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        items(stats.upcomingDues) { due -> DueRow(due) }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 StatTile(
@@ -1117,6 +1168,120 @@ private fun DashboardScreen(stats: Dashboard.Stats, onOpenReview: () -> Unit, re
             }
         }
     }
+}
+
+/**
+ * One upcoming bill.
+ *
+ * Leads with when rather than how much, because the deadline is the
+ * actionable part — an amount you owe next week and the same amount overdue
+ * are different situations. Overdue is coloured as an error rather than
+ * hidden, since a lapsed bill is precisely what someone needs to see.
+ */
+@Composable
+private fun DueRow(due: DueDateParser.Due) {
+    val days = due.daysFrom(System.currentTimeMillis())
+    val overdue = days != null && days < 0
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = if (overdue) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f)
+                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    due.label,
+                    fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    when {
+                        days == null -> ""
+                        days < 0 -> stringResource(R.string.dash_due_overdue, -days)
+                        days == 0 -> stringResource(R.string.dash_due_today)
+                        else -> stringResource(R.string.dash_due_in, days)
+                    },
+                    fontSize = 11.5.sp,
+                    color = if (overdue) MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            due.amount?.let {
+                Text(
+                    Dashboard.formatRupees(it),
+                    fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Drill-down for today's spending.
+ *
+ * Lists the individual transactions behind the headline number, because a
+ * total nobody can decompose is a total nobody can check. The correction
+ * hint is here rather than buried: the most likely reason a figure looks
+ * wrong is a misfiled message, and that is fixable in two taps.
+ */
+@Composable
+private fun TodaySpendDialog(stats: Dashboard.Stats, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.dash_today_title)) },
+        text = {
+            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                Text(
+                    Dashboard.formatRupees(stats.spentToday),
+                    fontSize = 28.sp, fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(Modifier.height(10.dp))
+                if (stats.todaySpends.isEmpty()) {
+                    Text(stringResource(R.string.dash_today_none), fontSize = 13.sp)
+                }
+                stats.todaySpends.forEach { spend ->
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                spend.counterparty ?: spend.body.take(40),
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                formatWhen(spend.at),
+                                fontSize = 10.5.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Text(
+                            Dashboard.formatRupees(spend.amount),
+                            fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    stringResource(R.string.dash_correct_hint),
+                    fontSize = 10.5.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.export_cancel)) }
+        }
+    )
 }
 
 @Composable

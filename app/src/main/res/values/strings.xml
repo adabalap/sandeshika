@@ -31,6 +31,16 @@
     <string name="ask_examples">Try: how much did I spend this month · what did Airtel say · when is my bill due</string>
     <string name="nav_rescan">Rescan inbox</string>
 
+    <string name="dash_today">Spent today</string>
+    <string name="dash_today_sub">%1$d transactions · tap for details</string>
+    <string name="dash_today_none">Nothing spent today</string>
+    <string name="dash_today_title">Today\'s spending</string>
+    <string name="dash_due_title">Coming up</string>
+    <string name="dash_due_none">No bills due in the next 30 days</string>
+    <string name="dash_due_today">due today</string>
+    <string name="dash_due_overdue">%1$d days overdue</string>
+    <string name="dash_due_in">in %1$d days</string>
+    <string name="dash_correct_hint">Wrong? Long-press it in the inbox to correct — the app remembers.</string>
     <string name="dash_spend_title">Spent this month</string>
     <string name="dash_spend_sub">from %1$d parsed transactions</string>
     <string name="dash_received">Received</string>
