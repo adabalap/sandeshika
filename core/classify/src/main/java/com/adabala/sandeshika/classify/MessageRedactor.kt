@@ -176,6 +176,31 @@ object MessageRedactor {
     }
 
     /**
+     * A stable grouping key for a message.
+     *
+     * More aggressive than [redactBody], and for a different purpose. Redaction
+     * preserves detail so a human can read a shape and spot a parser bug —
+     * digit counts, currency spacing, which mask style a bank uses. A key
+     * wants the opposite: every message that is "the same message with
+     * different values" must collapse to one string, so that correcting a
+     * single Bata offer re-labels all 311 of them instead of one.
+     *
+     * So digit lengths collapse, every remaining name and reference goes, and
+     * punctuation noise is normalised away.
+     */
+    fun shapeKey(sender: String, body: String): String {
+        var s = redactBody(body)
+        s = Regex("""<N\d+(\.DD)?>""").replace(s, "<N>")
+        s = Regex("""<ACCT[X*.]?>""").replace(s, "<ACCT>")
+        // Alphanumeric reference codes vary per message and would otherwise
+        // split one template into hundreds of singletons.
+        s = Regex("""\b(?=[A-Za-z0-9]{6,})(?=[A-Za-z0-9]*\d)[A-Za-z0-9]{6,}\b""").replace(s, "<REF>")
+        s = Regex("""\b\d+\b""").replace(s, "<N>")
+        s = Regex("""[^a-z0-9<>]+""", RegexOption.IGNORE_CASE).replace(s, " ")
+        return redactSender(sender) + "|" + s.lowercase().trim()
+    }
+
+    /**
      * Senders are kept as-is when they are commercial headers and dropped
      * when they are people.
      *

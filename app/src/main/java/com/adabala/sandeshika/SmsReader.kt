@@ -6,6 +6,9 @@ import android.provider.ContactsContract
 import android.provider.Telephony
 import com.adabala.sandeshika.classify.Category
 import com.adabala.sandeshika.classify.Classification
+import com.adabala.sandeshika.classify.LayeredClassifier
+import com.adabala.sandeshika.classify.MessageRedactor
+import com.adabala.sandeshika.classify.NaiveBayes
 import com.adabala.sandeshika.classify.RuleClassifier
 import com.adabala.sandeshika.classify.Sms
 
@@ -13,6 +16,8 @@ import com.adabala.sandeshika.classify.Sms
 data class ClassifiedSms(
     val sms: Sms,
     val classification: Classification,
+    /** Stable key for this message shape; what a correction is stored against. */
+    val shapeKey: String = "",
     /** Contact name when the sender is someone in the address book. */
     val contactName: String? = null
 ) {
@@ -63,14 +68,17 @@ object SmsReader {
     fun read(
         context: Context,
         limit: Int = NO_LIMIT,
+        corrections: CorrectionStore? = null,
         onProgress: (Int) -> Unit = {}
     ): List<ClassifiedSms> {
+        val overrides = corrections?.all().orEmpty()
         val projection = arrayOf(
             Telephony.Sms.ADDRESS,
             Telephony.Sms.BODY,
             Telephony.Sms.DATE
         )
         val out = mutableListOf<ClassifiedSms>()
+        val raw = mutableListOf<Sms>()
         context.contentResolver.query(
             Telephony.Sms.Inbox.CONTENT_URI,
             projection,
@@ -92,23 +100,64 @@ object SmsReader {
                     receivedAt = if (iDate >= 0) cursor.getLong(iDate) else 0L
                 )
                 if (sms.body.isBlank()) continue
-                val classification = RuleClassifier.classify(sms)
+                raw.add(sms)
                 // Only look up contacts for messages actually from a person.
                 // A lookup per message would be thousands of provider round
                 // trips, almost all of them for bank shortcodes that can
                 // never match anything.
-                val name = if (classification.category == Category.PERSONAL) {
-                    contacts.getOrPut(sms.sender) { lookupContact(context, sms.sender) }
-                } else {
-                    null
-                }
-                out.add(ClassifiedSms(sms, classification, name))
-                if (out.size % 200 == 0) onProgress(out.size)
+                if (raw.size % 500 == 0) onProgress(raw.size)
             }
+        }
+
+        // The model is trained here rather than persisted. It is derived data
+        // -- fully reproducible from the corrections plus the rule-labelled
+        // messages -- and a stored copy can only go stale relative to the
+        // corrections that define it. Training measured at under two seconds
+        // for ~9,000 examples, on a scan that is already asynchronous and
+        // already takes longer than that to read the inbox.
+        val ruleLabelled = raw.mapNotNull { sms ->
+            val c = RuleClassifier.classify(sms)
+            if (c.category == Category.OTHER) null else sms.body to c.category
+        }
+        val userLabelled = corrections?.trainingExamples().orEmpty()
+        val model = if (ruleLabelled.size >= MIN_TRAINING_EXAMPLES) {
+            runCatching { NaiveBayes.train(ruleLabelled + userLabelled) }.getOrNull()
+        } else {
+            null
+        }
+        val layered = LayeredClassifier(model)
+
+        raw.forEach { sms ->
+            val key = MessageRedactor.shapeKey(sms.sender, sms.body)
+            // A correction the user made explicitly outranks everything.
+            // Anything less would mean telling someone "this is a bill" and
+            // watching the app disagree on the next scan.
+            val override = overrides[key]
+            val classification = if (override != null) {
+                Classification(override, confident = true, why = "you corrected this")
+            } else {
+                layered.classify(sms)
+            }
+            val name = if (classification.category == Category.PERSONAL) {
+                contacts.getOrPut(sms.sender) { lookupContact(context, sms.sender) }
+            } else {
+                null
+            }
+            out.add(ClassifiedSms(sms, classification, key, name))
         }
         onProgress(out.size)
         return out
     }
+
+    /**
+     * Below this, the model is not built at all.
+     *
+     * A model trained on a handful of messages produces confident-looking
+     * output from coincidence, and the abstention margin cannot help: it
+     * compares classes against each other, so it cannot detect that every
+     * class is equally uninformed.
+     */
+    private const val MIN_TRAINING_EXAMPLES = 50
 
     const val NO_LIMIT = -1
 

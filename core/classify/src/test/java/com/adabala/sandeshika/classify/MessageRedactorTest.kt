@@ -127,4 +127,38 @@ class MessageRedactorTest {
     assertTrue("csv quotes escaped", csv.contains("\"a,b \"\"q\"\" c\""))
     assertTrue("csv has no raw newline in field", csv.trim().split("\n").size==2)
     }
+
+    /**
+     * The grouping key that makes one correction re-label every duplicate.
+     *
+     * Two opposing requirements, both asserted: messages that differ only in
+     * their values must collapse to one key, and messages that differ in
+     * meaning must not. Getting the first wrong makes correcting anything a
+     * chore; getting the second wrong silently re-labels messages the user
+     * never looked at.
+     */
+    @Test
+    fun `groups duplicate message shapes without merging distinct ones`() {
+        fun k(s: String, b: String) = MessageRedactor.shapeKey(s, b)
+
+    // the whole point: near-identical offers must share one key
+    assertTrue("Bata offers collapse to one key",
+        k("AD-BATAIn-S","Dear Bata Member, Get Rs. 250 OFF on Rs. 2000 shopping till 07 June at store. TnC")
+        == k("AD-BATAIn-S","Dear Bata Member, Get Rs. 200 OFF on Rs. 1000 shopping till 02 June at store. TnC"))
+    // UPI debits to different payees are the same template
+    assertTrue("different payees collapse",
+        k("JD-HDFCBK","Sent Rs.60.00 From HDFC Bank A/C *5261 To DHANDE PARVATI On 26/08/26")
+        == k("JD-HDFCBK","Sent Rs.9500.00 From HDFC Bank A/C *5261 To RAMESH KUMAR On 01/07/26"))
+    // ISO-date school messages, the ones that fragmented into 2462 singletons
+    assertTrue("school attendance messages collapse",
+        k("CP-GCETCP-S","Dear Parent, your ward X 25R11A66B2 was absent today 2025-08-28")
+        == k("CP-GCETCP-S","Dear Parent, your ward X 25R11A66B2 was absent today 2025-08-21"))
+    // but genuinely different messages must NOT collapse
+    assertTrue("different templates stay distinct",
+        k("VM-HDFCBK","Rs 500 debited from a/c") != k("VM-HDFCBK","Rs 500 credited to a/c"))
+    assertTrue("same body from different senders stays distinct",
+        k("AD-A","Get Rs. 250 OFF") != k("AD-B","Get Rs. 250 OFF"))
+    assertTrue("stable across calls", k("A","Rs 5 debited")==k("A","Rs 5 debited"))
+    assertTrue("personal sender anonymised in key", k("+919876543210","hi").startsWith("<PERSON>"))
+    }
 }

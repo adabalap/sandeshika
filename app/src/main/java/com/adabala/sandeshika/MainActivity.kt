@@ -165,7 +165,9 @@ private fun InboxScreen() {
         // Off the main thread: a provider query over hundreds of rows plus
         // classification is not free, and doing it inline drops frames on the
         // very first thing the user sees.
-        messages = withContext(Dispatchers.IO) { SmsReader.read(context) }
+        messages = withContext(Dispatchers.IO) {
+            SmsReader.read(context, corrections = CorrectionStore(context))
+        }
     }
 
     val all = messages
