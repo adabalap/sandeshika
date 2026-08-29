@@ -180,6 +180,10 @@ private fun InboxScreen() {
     var correcting by remember { mutableStateOf<ClassifiedSms?>(null) }
     var showReview by remember { mutableStateOf(false) }
     var skipped by remember { mutableStateOf(setOf<String>()) }
+    // Declared before every block that reads it. A composable body runs top
+    // to bottom like any other function, so a dialog placed above this line
+    // cannot see it -- which is exactly how this broke.
+    val store = remember { CorrectionStore(context) }
 
     if (showReview && all != null) {
         ReviewDialog(
@@ -203,7 +207,6 @@ private fun InboxScreen() {
             onDismiss = { showReview = false }
         )
     }
-    val store = remember { CorrectionStore(context) }
 
     correcting?.let { target ->
         CorrectionDialog(
