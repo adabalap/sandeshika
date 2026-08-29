@@ -1,0 +1,14 @@
+*.iml
+.gradle/
+/local.properties
+/.idea/
+.DS_Store
+build/
+/captures/
+.externalNativeBuild/
+.cxx/
+dist/
+
+# The wrapper is intentionally committed so CI and every machine use the same
+# Gradle. Do not let a broad *.jar rule swallow it.
+!gradle/wrapper/gradle-wrapper.jar

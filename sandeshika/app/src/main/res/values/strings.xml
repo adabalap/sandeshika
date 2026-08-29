@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Sandeshika</string>
+    <string name="perm_title">Sandeshika needs to read your messages</string>
+    <string name="perm_body">Everything happens on this phone. Messages are read, sorted and shown here — none of them are uploaded, and nothing is sent anywhere.</string>
+    <string name="perm_grant">Allow</string>
+    <string name="perm_denied">Without message access there is nothing to organise. You can grant it in Settings → Apps → Sandeshika → Permissions.</string>
+    <string name="empty_tab">Nothing here yet.</string>
+    <string name="loading">Reading your inbox…</string>
+    <string name="rescan">Rescan</string>
+    <string name="export">Export shapes</string>
+    <string name="export_title">Export for tuning</string>
+    <string name="export_body">Builds a redacted summary of the messages that could not be categorised, so the rules can be improved.\n\nAmounts, account numbers, names, phone numbers, dates and links are replaced with placeholders. Personal messages and OTPs are left out entirely. Names from your contacts are removed from every message. You will see exactly what it contains before anything is shared, and can add any words the rules missed.</string>
+    <string name="export_build">Build summary</string>
+    <string name="export_share">Share</string>
+    <string name="export_cancel">Close</string>
+    <string name="export_summary">%1$d distinct shapes from %2$d messages</string>
+    <string name="export_all_scope">Include all categories, not just uncategorised</string>
+    <string name="export_custom">Also redact these words (comma separated)</string>
+    <string name="export_rebuild">Rebuild with these</string>
+    <string name="export_csv">Share CSV</string>
+    <string name="export_txt">Share text</string>
+    <string name="export_truncated">…and %1$d more shapes in the shared file.</string>
+    <string name="scanned">%1$d messages · %2$d uncategorised</string>
+</resources>

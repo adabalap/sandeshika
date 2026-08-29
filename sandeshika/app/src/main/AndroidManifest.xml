@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      READ_SMS is a "dangerous" permission and must also be requested at
+      runtime; declaring it here alone grants nothing.
+
+      Worth knowing before this ever goes near Play: Google restricts SMS
+      permissions to apps that are the user's default SMS handler, or that
+      pass a use-case declaration review. Sandeshika is deliberately
+      read-only, so distribution is sideload or a declaration: a constraint
+      of the product decision, not an oversight.
+    -->
+    <uses-permission android:name="android.permission.READ_SMS" />
+
+    <!--
+      Optional. Used only to show an address-book name instead of a bare
+      number on messages from people. SmsReader returns null rather than
+      throwing when this is not granted, so declining it costs you names and
+      nothing else.
+    -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+
+    <application
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Sandeshika">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:theme="@style/Theme.Sandeshika">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!--
+          Sharing the tuning export as a file rather than an Intent extra.
+          EXTRA_TEXT goes through a Binder transaction capped near 1 MB, and a
+          real inbox produced 2,988 shapes, comfortably past it, which
+          crashed the app with TransactionTooLargeException the moment Share
+          was tapped. A content:// URI has no such limit, and it is also what
+          lets the file open in a spreadsheet.
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.exports"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+    </application>
+</manifest>
