@@ -16,6 +16,19 @@
     <string name="nav_review">Teach the app</string>
     <string name="nav_export">Export shapes</string>
     <string name="nav_about">About</string>
+    <string name="nav_ask">Ask</string>
+    <string name="ask_title">Ask about your messages</string>
+    <string name="ask_hint">e.g. how much did I spend this month?</string>
+    <string name="ask_send">Ask</string>
+    <string name="ask_connect">Connect Medha</string>
+    <string name="ask_no_medha">Medha is not installed. Totals still work without it; questions about message content need it.</string>
+    <string name="ask_not_connected">Connect Medha to ask questions in your own words. Totals are answered on-device either way.</string>
+    <string name="ask_connected">Connected · answers stay on this phone</string>
+    <string name="ask_computed">Answered from your messages, no model involved.</string>
+    <string name="ask_thinking">Reading your messages…</string>
+    <string name="ask_denied">Access denied. Totals still work.</string>
+    <string name="ask_error">Could not reach Medha: %1$s</string>
+    <string name="ask_examples">Try: how much did I spend this month · what did Airtel say · when is my bill due</string>
     <string name="nav_rescan">Rescan inbox</string>
 
     <string name="dash_spend_title">Spent this month</string>

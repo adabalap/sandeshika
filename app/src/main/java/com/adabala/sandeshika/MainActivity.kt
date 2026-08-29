@@ -47,7 +47,10 @@ import androidx.compose.material3.LinearProgressIndicator
 import com.adabala.sandeshika.classify.Category
 import com.adabala.sandeshika.classify.Classification
 import com.adabala.sandeshika.classify.MessageRedactor
+import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
 import com.adabala.sandeshika.classify.Dashboard
+import com.adabala.sandeshika.classify.QuestionRouter
 import com.adabala.sandeshika.classify.ReviewQueue
 import com.adabala.sandeshika.classify.TransactionParser
 import kotlinx.coroutines.Dispatchers
@@ -214,6 +217,12 @@ private fun HomeScreen() {
                     label = { Text(stringResource(R.string.nav_inbox)) },
                     selected = screen == Screen.INBOX,
                     onClick = { screen = Screen.INBOX; scope.launch { drawer.close() } },
+                    modifier = Modifier.padding(horizontal = 10.dp)
+                )
+                NavigationDrawerItem(
+                    label = { Text(stringResource(R.string.nav_ask)) },
+                    selected = screen == Screen.ASK,
+                    onClick = { screen = Screen.ASK; scope.launch { drawer.close() } },
                     modifier = Modifier.padding(horizontal = 10.dp)
                 )
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
@@ -390,6 +399,10 @@ private fun InboxScreen(screen: Screen = Screen.INBOX, onOpenDrawer: () -> Unit 
         }
     ) { pad ->
         Box(Modifier.padding(pad).fillMaxSize()) {
+            if (screen == Screen.ASK && all != null) {
+                AskScreen(all)
+                return@Box
+            }
             if (screen == Screen.DASHBOARD && all != null) {
                 val stats = remember(all) {
                     Dashboard.compute(all.map { Triple(it.sms, it.classification, it.sms.receivedAt) })
@@ -805,8 +818,187 @@ private fun CorrectionDialog(
     )
 }
 
+/**
+ * Natural-language questions over the inbox.
+ *
+ * Two paths, and which one runs is decided before any model is involved.
+ * Anything answerable by arithmetic is computed here and labelled as such,
+ * so a spending total never depends on a model getting a sum right. Only
+ * questions that need to *read* messages go to Medha, with the app choosing
+ * the handful of messages sent as context.
+ *
+ * Medha being absent degrades the feature rather than breaking it: totals
+ * keep working, and the screen says plainly what is unavailable and why.
+ */
+@Composable
+private fun AskScreen(messages: List<ClassifiedSms>) {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("medha", Context.MODE_PRIVATE) }
+    var client by remember {
+        mutableStateOf(
+            prefs.getString("token", null)?.let { tok ->
+                prefs.getString("base", null)?.let { base -> MedhaClient(base, tok) }
+            }
+        )
+    }
+    var question by remember { mutableStateOf("") }
+    var answer by remember { mutableStateOf<String?>(null) }
+    var computed by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
+
+    val handshake = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val data = result.data
+        if (result.resultCode == android.app.Activity.RESULT_OK && data != null) {
+            val tok = data.getStringExtra("com.adabala.medha.extra.TOKEN").orEmpty()
+            val base = data.getStringExtra("com.adabala.medha.extra.BASE_URL").orEmpty()
+            prefs.edit().putString("token", tok).putString("base", base).apply()
+            client = MedhaClient(base, tok)
+        } else {
+            answer = context.getString(R.string.ask_denied)
+        }
+    }
+
+    fun connect() {
+        // Resolved by action, not a fixed package: Medha ships under several
+        // applicationIds depending on build variant.
+        val probe = Intent("com.adabala.medha.action.REQUEST_ACCESS")
+        val target = context.packageManager.queryIntentActivities(probe, 0)
+            .map { it.activityInfo.packageName }
+            .firstOrNull { it == "com.adabala.medha" || it.startsWith("com.adabala.medha.") }
+        if (target == null) {
+            answer = context.getString(R.string.ask_no_medha)
+            return
+        }
+        handshake.launch(
+            Intent("com.adabala.medha.action.REQUEST_ACCESS").apply {
+                setPackage(target)
+                putExtra("com.adabala.medha.extra.CAPABILITIES", arrayOf("generate"))
+                putExtra(
+                    "com.adabala.medha.extra.REASON",
+                    "To answer questions about your messages without sending them anywhere"
+                )
+            }
+        )
+    }
+
+    val scope = rememberCoroutineScope()
+
+    fun ask() {
+        val q = question.trim()
+        if (q.isEmpty()) return
+        answer = null; computed = false; busy = true
+        val pairs = messages.map { it.sms to it.classification }
+
+        // A coroutine rather than a raw thread: state updates have to land on
+        // the main thread, and scoping to the composition means an in-flight
+        // request is cancelled if this screen goes away instead of writing to
+        // state nobody is showing.
+        scope.launch {
+            when (val plan = QuestionRouter.plan(q, pairs)) {
+                is QuestionRouter.Plan.Computed -> {
+                    // Deterministic. No model, no network, no uncertainty.
+                    answer = plan.answer; computed = true; busy = false
+                }
+                is QuestionRouter.Plan.NothingFound -> {
+                    answer = plan.reason; computed = true; busy = false
+                }
+                is QuestionRouter.Plan.AskModel -> {
+                    val c = client
+                    if (c == null) {
+                        answer = context.getString(R.string.ask_not_connected)
+                        busy = false
+                        return@launch
+                    }
+                    val prompt = QuestionRouter.buildPrompt(plan.question, plan.context)
+                    try {
+                        val sb = StringBuilder()
+                        // Network off the main thread; the collector writes
+                        // state back on it via the outer scope.
+                        withContext(Dispatchers.IO) {
+                            c.chatStream(listOf("user" to prompt)) { delta ->
+                                sb.append(delta)
+                            }
+                        }
+                        answer = sb.toString().ifBlank { "(no answer)" }
+                    } catch (e: Exception) {
+                        answer = context.getString(R.string.ask_error, e.message.orEmpty())
+                    } finally {
+                        busy = false
+                    }
+                }
+            }
+        }
+    }
+
+    Column(Modifier.fillMaxSize().padding(16.dp)) {
+        Text(
+            stringResource(R.string.ask_title),
+            fontSize = 18.sp, fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            if (client != null) stringResource(R.string.ask_connected)
+            else stringResource(R.string.ask_not_connected),
+            fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        if (client == null) {
+            Spacer(Modifier.height(8.dp))
+            Button(onClick = { connect() }) { Text(stringResource(R.string.ask_connect)) }
+        }
+        Spacer(Modifier.height(14.dp))
+        OutlinedTextField(
+            value = question,
+            onValueChange = { question = it },
+            label = { Text(stringResource(R.string.ask_hint), fontSize = 12.sp) },
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Button(onClick = { ask() }, enabled = !busy) {
+                Text(stringResource(R.string.ask_send))
+            }
+            Spacer(Modifier.width(12.dp))
+            if (busy) {
+                Text(stringResource(R.string.ask_thinking), fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Text(
+            stringResource(R.string.ask_examples),
+            fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        answer?.let { text ->
+            Spacer(Modifier.height(16.dp))
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.padding(14.dp).verticalScroll(rememberScrollState())) {
+                    Text(text, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
+                    if (computed) {
+                        Spacer(Modifier.height(8.dp))
+                        // Says which answers are arithmetic and which came
+                        // from a model. They warrant different levels of
+                        // trust and the person deserves to know which is which.
+                        Text(
+                            stringResource(R.string.ask_computed),
+                            fontSize = 10.5.sp, fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 /** Which top-level surface is showing. */
-private enum class Screen { DASHBOARD, INBOX }
+private enum class Screen { DASHBOARD, INBOX, ASK }
 
 /**
  * The dashboard.

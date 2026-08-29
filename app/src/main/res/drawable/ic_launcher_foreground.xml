@@ -1,35 +1,37 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  A prism separating light into a spectrum.
+  A message bubble whose contents are sorted, colour-coded rows.
 
-  The metaphor is the product: one undifferentiated stream of messages goes
-  in, distinct categories come out. It replaces a stack of cards that said
-  nothing more than "this app has messages in it", which every messaging app
-  could claim.
+  Says both halves of what the app is: these are SMS, and they have been put
+  in order. The previous icon was a prism, which was a fair metaphor for
+  separation but told nobody it had anything to do with messages.
 
-  The three bars use the app's own category colours, so the icon is showing
-  the actual thing the app does rather than an arbitrary rainbow.
+  The three swatches use the app's real category colours (money, bills,
+  codes), so the icon shows the actual product rather than decoration.
 
-  An earlier version drew the incoming beam too. It was dropped after
-  rendering at true launcher size, where it read as a stray stub hanging off
-  the triangle rather than as light entering it. The separation reads without
-  it.
-
-  Content stays within x,y in [18,98] of the 108 viewport, inside the
+  Content stays within x,y in [15,93] of the 108 viewport, inside the
   adaptive-icon keyline.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
 
-    <path android:pathData="M42,28 L66,76 L18,76 Z"
-        android:strokeColor="#FFFFFFFF" android:strokeWidth="6.5"
-        android:strokeLineJoin="round" android:fillColor="#00000000" />
+    <path
+        android:pathData="M26,24 h56 a11,11 0 0 1 11,11 v30 a11,11 0 0 1 -11,11 h-32 l-16,13 v-13 h-8 a11,11 0 0 1 -11,-11 v-30 a11,11 0 0 1 11,-11 z"
+        android:fillColor="#FFFFFFFF" />
 
-    <path android:pathData="M75.75,36 h18.5 a3.75,3.75 0 0 1 0,7.5 h-18.5 a3.75,3.75 0 0 1 0,-7.5 z"
-        android:fillColor="#FF4ADE80" />
-    <path android:pathData="M75.75,48 h16.5 a3.75,3.75 0 0 1 0,7.5 h-16.5 a3.75,3.75 0 0 1 0,-7.5 z"
-        android:fillColor="#FFF87171" />
-    <path android:pathData="M75.75,60 h13.5 a3.75,3.75 0 0 1 0,7.5 h-13.5 a3.75,3.75 0 0 1 0,-7.5 z"
-        android:fillColor="#FFC084FC" />
+    <path android:pathData="M38.5,37 h4 a2.5,2.5 0 0 1 2.5,2.5 v3 a2.5,2.5 0 0 1 -2.5,2.5 h-4 a2.5,2.5 0 0 1 -2.5,-2.5 v-3 a2.5,2.5 0 0 1 2.5,-2.5 z"
+        android:fillColor="#FF1B8A3A" />
+    <path android:pathData="M52.5,38.5 h28 a2.5,2.5 0 0 1 0,5 h-28 a2.5,2.5 0 0 1 0,-5 z"
+        android:fillColor="#38000000" />
+
+    <path android:pathData="M38.5,50 h4 a2.5,2.5 0 0 1 2.5,2.5 v3 a2.5,2.5 0 0 1 -2.5,2.5 h-4 a2.5,2.5 0 0 1 -2.5,-2.5 v-3 a2.5,2.5 0 0 1 2.5,-2.5 z"
+        android:fillColor="#FFC0392B" />
+    <path android:pathData="M52.5,51.5 h21 a2.5,2.5 0 0 1 0,5 h-21 a2.5,2.5 0 0 1 0,-5 z"
+        android:fillColor="#38000000" />
+
+    <path android:pathData="M38.5,63 h4 a2.5,2.5 0 0 1 2.5,2.5 v3 a2.5,2.5 0 0 1 -2.5,2.5 h-4 a2.5,2.5 0 0 1 -2.5,-2.5 v-3 a2.5,2.5 0 0 1 2.5,-2.5 z"
+        android:fillColor="#FF6A4CB8" />
+    <path android:pathData="M52.5,64.5 h15 a2.5,2.5 0 0 1 0,5 h-15 a2.5,2.5 0 0 1 0,-5 z"
+        android:fillColor="#38000000" />
 </vector>

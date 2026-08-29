@@ -7,8 +7,9 @@
         <aapt:attr name="android:fillColor">
             <gradient android:startX="10" android:startY="6" android:endX="98" android:endY="102"
                 android:type="linear">
-                <item android:offset="0.0" android:color="#FF241A16" />
-                <item android:offset="1.0" android:color="#FF4A2C1A" />
+                <item android:offset="0.0" android:color="#FF7B3F00" />
+                <item android:offset="0.5" android:color="#FFC2621A" />
+                <item android:offset="1.0" android:color="#FFE89B4C" />
             </gradient>
         </aapt:attr>
     </path>
